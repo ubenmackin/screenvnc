@@ -1,0 +1,98 @@
+name: OuterView
+options:
+  bundleIdPrefix: com.volcrypt
+  deploymentTarget:
+    iOS: "27.1"
+
+targets:
+  OuterView:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - path: Assets.xcassets
+        buildPhase: resources
+    dependencies:
+      - sdk: AppIntents.framework
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        INFOPLIST_FILE: Support/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.volcrypt.OuterView
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: LYYD96F2J8
+        IPHONEOS_DEPLOYMENT_TARGET: "27.1"
+        INFOPLIST_KEY_CFBundleDisplayName: "Outer View"
+        INFOPLIST_KEY_CKSharingSupported: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        PRODUCT_NAME: OuterView
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        STRING_CATALOG_GENERATE_SYMBOLS: YES
+        SWIFT_EMIT_LOC_STRINGS: YES
+      configs:
+        Debug:
+          base:
+            SWIFT_ENABLE_TESTABILITY: "YES"
+
+  OuterViewTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+    dependencies:
+      - target: OuterView
+      - sdk: AppIntents.framework
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        GENERATE_INFOPLIST_FILE: "YES"
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/OuterView.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/OuterView
+        BUNDLE_LOADER: $(TEST_HOST)
+        ENABLE_APP_INTENTS_METADATA_EXTRACTION: NO
+        ENABLE_APP_INTENTS_METADATA_GENERATION: NO
+
+  OuterViewUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - OuterViewUITests
+    dependencies:
+      - target: OuterView
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        GENERATE_INFOPLIST_FILE: "YES"
+        TEST_TARGET_NAME: OuterView
+        ENABLE_APP_INTENTS_METADATA_EXTRACTION: NO
+        ENABLE_APP_INTENTS_METADATA_GENERATION: NO
+
+schemes:
+  OuterView:
+    build:
+      targets:
+        OuterView: all
+        OuterViewTests: [test]
+        OuterViewUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      testPlans:
+        - path: Support/TestPlans/OuterView.xctestplan
+          defaultPlan: true
+        - path: Support/TestPlans/OuterViewFast.xctestplan
+          defaultPlan: false

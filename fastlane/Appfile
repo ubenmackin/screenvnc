@@ -1,0 +1,2 @@
+# Fastlane — bundle identifier for screenshot-only lanes.
+app_identifier("com.volcrypt.OuterView")

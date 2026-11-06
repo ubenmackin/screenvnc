@@ -1,0 +1,279 @@
+/* Docs — OuterView support site styles. */
+:root {
+  --navy: #0a1f44;
+  --navy-deep: #07122b;
+  --ink: #16233a;
+  --paper: #f5f8fd;
+  --glass: rgba(255, 255, 255, 0.72);
+  --card: #ffffff;
+  --line: rgba(10, 31, 68, 0.14);
+  --accent-ink: #ffffff;
+  --muted: #5c6b84;
+  --radius: 16px;
+  --content-width: 960px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+main {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 0 1rem 3rem;
+}
+
+section {
+  padding: 2.5rem 0 0;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  color: var(--navy);
+  text-wrap: balance;
+}
+
+p {
+  max-width: 62ch;
+}
+
+a {
+  color: var(--navy);
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+/* Prefixed blur keeps the frosted header intact in Safari versions lacking the unprefixed property. */
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem max(1rem, calc((100% - var(--content-width)) / 2));
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  border-bottom: 1px solid var(--line);
+}
+
+header p {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--navy);
+}
+
+header nav {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.95rem;
+}
+
+header nav a {
+  text-decoration: none;
+  padding: 0.25rem 0.1rem;
+}
+
+header nav a:hover {
+  text-decoration: underline;
+}
+
+.hero {
+  padding-top: 3.5rem;
+}
+
+.hero h1 {
+  font-size: clamp(2rem, 4vw + 1rem, 3.25rem);
+  letter-spacing: -0.02em;
+}
+
+.hero p {
+  margin-top: 1rem;
+  font-size: clamp(1.05rem, 1vw + 0.9rem, 1.3rem);
+  color: var(--muted);
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+#features article {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+#features article h3 {
+  font-size: 1.02rem;
+  margin-bottom: 0.5rem;
+}
+
+#features article p {
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+#screenshots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+#screenshots h2 {
+  grid-column: 1 / -1;
+}
+
+#screenshots figure {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+#screenshots figure img {
+  width: 100%;
+  background: var(--navy-deep);
+}
+
+#screenshots figcaption {
+  padding: 0.65rem 1rem 0.85rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+#support ol {
+  margin: 1rem 0 0 1.25rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+#support p {
+  margin-top: 1.25rem;
+}
+
+#support p a {
+  display: inline-block;
+  background: var(--navy);
+  color: var(--accent-ink);
+  font-weight: 600;
+  text-decoration: none;
+  padding: 0.7rem 1.3rem;
+  border-radius: 999px;
+}
+
+#support p a:hover {
+  background: var(--navy-deep);
+}
+
+footer {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.875rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+footer a {
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--navy);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (max-width: 720px) {
+  header {
+    flex-wrap: wrap;
+  }
+
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #screenshots {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e8eef8;
+    --paper: #060f22;
+    --glass: rgba(7, 18, 43, 0.72);
+    --card: #0c1a36;
+    --line: rgba(232, 238, 248, 0.16);
+    --muted: #a3b2ca;
+  }
+
+  h1,
+  h2,
+  h3,
+  header p,
+  header nav a,
+  a {
+    color: var(--ink);
+  }
+
+  #support p a {
+    background: var(--ink);
+    color: var(--navy-deep);
+  }
+
+  #support p a:hover {
+    background: #ffffff;
+  }
+
+  :focus-visible {
+    outline-color: var(--ink);
+  }
+}
+
+/* Motion is removed entirely under reduce so opacity and color shifts never animate against the OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
