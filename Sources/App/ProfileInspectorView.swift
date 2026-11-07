@@ -32,7 +32,7 @@ public struct ProfileRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(profile.name)
                     .font(.headline)
-                Text("\(profile.host):\(profile.port) • \(profile.authMethod.displayName)")
+                Text("\(profile.host):\(String(profile.port)) • \(profile.authMethod.displayName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -76,13 +76,22 @@ public struct ProfileInspectorView: View {
                 .font(.title.bold())
 
             VStack(alignment: .leading, spacing: 8) {
-                detailRow("Host Address", value: "\(profile.host):\(profile.port)")
+                detailRow("Host Address", value: "\(profile.host):\(String(profile.port))")
                 detailRow("Authentication", value: profile.authMethod.displayName)
                 if !profile.username.isEmpty {
                     detailRow("Username", value: profile.username)
                 }
                 detailRow("Display Mode", value: profile.displayPreference.displayName)
                 detailRow("Compression", value: profile.qualityPreference.displayName)
+                if let pointerMode = profile.pointerMode {
+                    detailRow("Pointer Mode", value: pointerMode.displayName)
+                }
+                if let mac = profile.macAddress, !mac.isEmpty {
+                    detailRow("MAC Address", value: mac)
+                }
+                if let lastConnected = profile.lastConnectedDate {
+                    detailRow("Last Connected", value: lastConnected.formatted(date: .abbreviated, time: .shortened))
+                }
             }
             .padding()
             .frame(maxWidth: 400)

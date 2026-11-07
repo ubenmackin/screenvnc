@@ -29,8 +29,8 @@ private final class SessionClientBridge: VNCClientDelegate {
         framebuffer.applyCopyRect(dest: dest, srcX: srcX, srcY: srcY)
     }
 
-    func vncClient(_ _: VNCClient, didReceiveCutText _: String) {
-        // Clipboard text ignored in this slice; kept for contract completeness.
+    func vncClient(_ _: VNCClient, didReceiveCutText text: String) {
+        UIPasteboard.general.string = text
     }
 }
 
@@ -44,8 +44,8 @@ public struct InSessionView: View {
     private var settings = SettingsStore.shared
     @State private var activeModifiers: Set<MacKey> = []
     @State private var displayPreference: DisplayPreference
-    @State private var pointerMode: PointerMode = .directTouch
-    @State private var isTabletopConsoleEnabled: Bool = false
+    @State private var pointerMode: PointerMode
+    @State private var isTabletopConsoleEnabled: Bool
     @State private var connectionState: VNCConnectionState = .connecting
     @State private var errorMessage: String?
 
@@ -56,6 +56,15 @@ public struct InSessionView: View {
         self.profile = profile
         self.onDismiss = onDismiss
         _displayPreference = State(initialValue: profile.displayPreference)
+        let preferredPointer = profile.pointerMode ?? SettingsStore.shared.defaultPointerMode
+        _pointerMode = State(initialValue: preferredPointer)
+        let shouldEnableTabletop = switch SettingsStore.shared.tabletopConsoleMode {
+        case .alwaysSplitConsole:
+            true
+        case .alwaysFullCanvas, .auto:
+            false
+        }
+        _isTabletopConsoleEnabled = State(initialValue: shouldEnableTabletop)
     }
 
     public var body: some View {

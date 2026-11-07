@@ -72,6 +72,7 @@ public struct ConnectionProfile: Identifiable, Sendable, Hashable, Codable {
     public var username: String
     public var displayPreference: DisplayPreference
     public var qualityPreference: QualityPreference
+    public var pointerMode: PointerMode?
     public var macAddress: String?
     public var isFavorite: Bool
     public var requiresBiometrics: Bool
@@ -82,10 +83,11 @@ public struct ConnectionProfile: Identifiable, Sendable, Hashable, Codable {
         name: String = "",
         host: String,
         port: Int = 5900,
-        authMethod: AuthMethod = .appleDH,
+        authMethod: AuthMethod = .vncDES,
         username: String = "",
         displayPreference: DisplayPreference = .fit,
         qualityPreference: QualityPreference = .adaptive,
+        pointerMode: PointerMode? = nil,
         macAddress: String? = nil,
         isFavorite: Bool = false,
         requiresBiometrics: Bool = false,
@@ -99,6 +101,7 @@ public struct ConnectionProfile: Identifiable, Sendable, Hashable, Codable {
         self.username = username
         self.displayPreference = displayPreference
         self.qualityPreference = qualityPreference
+        self.pointerMode = pointerMode
         self.macAddress = macAddress
         self.isFavorite = isFavorite
         self.requiresBiometrics = requiresBiometrics

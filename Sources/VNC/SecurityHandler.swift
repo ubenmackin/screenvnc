@@ -2,6 +2,7 @@
 import CommonCrypto
 import CryptoKit
 import Foundation
+import Security
 
 public enum VNCAuthError: LocalizedError, Equatable {
     case invalidChallengeLength
@@ -72,21 +73,101 @@ public enum SecurityHandler {
         return response
     }
 
-    /// Encrypts user credentials for macOS Screen Sharing Type 30 (Apple DH/ARD).
+    /// Generates Diffie-Hellman ephemeral keypair for Apple ARD Type 30 authentication.
+    public static func generateAppleDHEphemeralKeyPair(
+        generator: UInt16,
+        primeData: Data,
+        keyLength: Int
+    ) throws -> (privateKey: BigUInt, publicKeyData: Data) {
+        let genVal = BigUInt(UInt64(generator))
+        let modulus = BigUInt(bigEndian: primeData)
+        guard !modulus.isZero else {
+            throw VNCAuthError.authenticationRejected("Invalid Diffie-Hellman prime modulus.")
+        }
+
+        // Generate 256-bit random private exponent
+        var randomBytes = [UInt8](repeating: 0, count: 32)
+        let status = SecRandomCopyBytes(kSecRandomDefault, 32, &randomBytes)
+        guard status == errSecSuccess else {
+            throw VNCAuthError.authenticationRejected("Failed to generate cryptographic random bytes.")
+        }
+        let privExp = BigUInt(bigEndian: Data(randomBytes))
+        let clientPub = try genVal.power(privExp, modulus: modulus)
+        let pubData = clientPub.serialize(minBytes: keyLength)
+        return (privExp, pubData)
+    }
+
+    /// Computes Diffie-Hellman shared secret S = (A^b) mod p for Apple ARD Type 30.
+    public static func computeAppleDHSharedSecret(
+        serverPublicKeyData: Data,
+        privateKey: BigUInt,
+        primeData: Data,
+        keyLength: Int
+    ) throws -> Data {
+        let peerPub = BigUInt(bigEndian: serverPublicKeyData)
+        let modulus = BigUInt(bigEndian: primeData)
+        // Reject empty or all-zero wire material before modular math.
+        guard !modulus.isZero else {
+            throw VNCAuthError.authenticationRejected("Invalid Diffie-Hellman prime modulus.")
+        }
+        guard !peerPub.isZero else {
+            throw VNCAuthError.authenticationRejected("Invalid Diffie-Hellman server public key.")
+        }
+        let shared = try peerPub.power(privateKey, modulus: modulus)
+        return shared.serialize(minBytes: keyLength)
+    }
+
+    /// Derives 16-byte AES-128 key by taking MD5 hash of the shared secret.
+    public static func deriveAppleDHAESKey(sharedSecret: Data) -> Data {
+        let digest = Insecure.MD5.hash(data: sharedSecret)
+        return Data(digest)
+    }
+
+    /// Packs and encrypts credentials for macOS Screen Sharing Type 30 (Apple DH/ARD).
+    /// Uses 128-byte block: username (64 bytes null-padded) + password (64 bytes null-padded)
+    /// encrypted with AES-128-ECB.
     public static func prepareAppleDHCredentials(
         username: String,
         password: String,
-        sharedKey: SymmetricKey
+        aesKey: Data
     ) throws -> Data {
-        let payload = "\(username):\(password)"
-        guard let data = payload.data(using: .utf8) else {
-            throw VNCAuthError.authenticationRejected("Unable to encode credentials.")
+        guard aesKey.count == 16 else {
+            throw VNCAuthError.authenticationRejected("Invalid AES key length for Apple DH.")
         }
-        // Encrypt credentials with AES-GCM using the negotiated key.
-        let sealed = try AES.GCM.seal(data, using: sharedKey)
-        guard let combined = sealed.combined else {
-            throw VNCAuthError.authenticationRejected("Unable to seal credentials.")
+
+        var plainBlock = [UInt8](repeating: 0, count: 128)
+        let userBytes = Array(username.utf8.prefix(63))
+        for (idx, byte) in userBytes.enumerated() {
+            plainBlock[idx] = byte
         }
-        return combined
+        let passBytes = Array(password.utf8.prefix(63))
+        for (idx, byte) in passBytes.enumerated() {
+            plainBlock[64 + idx] = byte
+        }
+
+        var cipherBlock = [UInt8](repeating: 0, count: 128)
+        var numBytesEncrypted: size_t = 0
+
+        let cryptStatus = aesKey.withUnsafeBytes { keyPtr in
+            CCCrypt(
+                CCOperation(kCCEncrypt),
+                CCAlgorithm(kCCAlgorithmAES),
+                CCOptions(kCCOptionECBMode),
+                keyPtr.baseAddress,
+                16,
+                nil,
+                plainBlock,
+                128,
+                &cipherBlock,
+                128,
+                &numBytesEncrypted
+            )
+        }
+
+        guard cryptStatus == kCCSuccess, numBytesEncrypted == 128 else {
+            throw VNCAuthError.authenticationRejected("AES encryption of Apple DH credentials failed.")
+        }
+
+        return Data(cipherBlock)
     }
 }
