@@ -1,7 +1,7 @@
 # Snapshot — shared defaults; lanes supply single-device lists.
 # Single output root; first lane clears so later devices append.
 languages(["en-US"])
-scheme("OuterView")
+scheme("ScreenVNC")
 output_directory("fastlane/screenshots")
 erase_simulator(true)
 reinstall_app(true)
@@ -10,6 +10,6 @@ clear_previous_screenshots(false)
 concurrent_simulators(false)
 # Every lane passes localize_simulator false; the default mirrors that contract.
 localize_simulator(false)
-launch_arguments(["-OuterViewScreenshots"])
-only_testing(["OuterViewUITests/OuterViewScreenshots"])
+launch_arguments(["-ScreenVNCScreenshots"])
+only_testing(["ScreenVNCUITests/ScreenVNCScreenshots"])
 number_of_retries(0)

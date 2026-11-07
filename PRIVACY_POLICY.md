@@ -12,15 +12,17 @@ We don't track or use your data off device. Ever.
 - **No servers** - Everything happens on your device
 - **No tracking** - We have no analytics, telemetry, or user tracking
 
-## What Information OuterView Stores
+## What Information ScreenVNC Stores
 
 ### On Your Device
 
-Your browsing data stays on your device inside SwiftData with zero tracking.
+Your connection profiles stay on your device with zero tracking.
 
-1. **Web History**
-   - Information about when, what, and what websites you visit in the app
-   - This data can be cleaned up and removed in-app
+1. **Connection profiles**
+   - Host, port, credentials, and display options for your saved hosts
+   - Stored in SwiftData; per-host display preferences stored in UserDefaults
+   - No web history is collected and no websites visited are recorded
+   - You can add or delete saved profiles in-app
 
 ### Off Your Device
 
@@ -32,7 +34,7 @@ None!
 
 ## What We DON'T Do
 
-OuterView **never**:
+ScreenVNC **never**:
 - Collects personal information
 - Tracks your location
 - Stores data on servers
@@ -42,7 +44,7 @@ OuterView **never**:
 
 ## Children's Privacy
 
-OuterView is meant for users 17+, and does not knowingly collect information from children.
+ScreenVNC is meant for users 17+, and does not knowingly collect information from children.
 The app has no age verification because it collects no personal information from anyone.
 
 ## Changes to This Policy
@@ -53,4 +55,4 @@ If we update this policy:
 
 ## Contact
 
-OuterView is available for free. For privacy questions, please ask via [GitHub issues](https://github.com/ubenmackin/outerview/issues).
+ScreenVNC is available for free. For privacy questions, please ask via [GitHub issues](https://github.com/ubenmackin/screenvnc/issues).

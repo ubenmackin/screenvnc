@@ -1,0 +1,25 @@
+{
+  "configurations" : [
+    {
+      "id" : "B6B4C3D2-5E6F-4A7B-9C0D-1E2F3A4B5C6D",
+      "name" : "Configuration 1",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "randomExecutionOrdering" : true
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:ScreenVNC.xcodeproj",
+        "identifier" : "ScreenVNCTests",
+        "name" : "ScreenVNCTests"
+      }
+    }
+  ],
+  "version" : 1
+}

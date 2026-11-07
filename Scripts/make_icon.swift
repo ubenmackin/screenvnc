@@ -1,10 +1,5 @@
-//
-//  make_icon.swift
-//  OuterView
-//
-//  Generates the 1024x1024 app icon into Assets.xcassets/AppIcon.appiconset.
-//  Run once: swift Scripts/make_icon.swift
-//
+// Scripts — Generate the ScreenVNC app icon into Assets.xcassets.
+// Run once: swift Scripts/make_icon.swift.
 
 import CoreGraphics
 import Foundation
@@ -47,39 +42,54 @@ context.drawLinearGradient(
     options: []
 )
 
-// Folded-display silhouette: two rounded rects in the outer display's portrait
-// proportions (466 x 678 scaled to 384 x 560). The left panel is two thirds of
-// the display width; the right panel — the remaining third — is offset further
-// right to suggest the hinge opening. Corner radius mirrors the Duo's 59 pt
-// display radius.
-let displayWidth: CGFloat = 384
-let displayHeight: CGFloat = 560
+// Centered monitor mark; bezel plus screen plus stand read as remote desktop.
+let displayWidth: CGFloat = 624
+let displayHeight: CGFloat = 400
 let originX = (CGFloat(size) - displayWidth) / 2
-let originY = (CGFloat(size) - displayHeight) / 2
-let seam: CGFloat = 18
-let rightOffset: CGFloat = 46
-let radius: CGFloat = 59
+let originY = (CGFloat(size) - displayHeight) / 2 - 60
+let radius: CGFloat = 36
 
-let leftWidth = ((displayWidth - seam) * 2 / 3).rounded()
-let rightWidth = displayWidth - seam - leftWidth
-
-let panels = [
-    CGRect(x: originX, y: originY, width: leftWidth, height: displayHeight),
-    CGRect(
-        x: originX + leftWidth + seam + rightOffset,
-        y: originY,
-        width: rightWidth,
-        height: displayHeight
-    )
-]
+let bezel = CGRect(x: originX, y: originY, width: displayWidth, height: displayHeight)
 
 context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
-for rect in panels {
-    context.addPath(
-        CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
-    )
-    context.fillPath()
-}
+context.addPath(
+    CGPath(roundedRect: bezel, cornerWidth: radius, cornerHeight: radius, transform: nil)
+)
+context.fillPath()
+
+// Inset screen keeps the framebuffer distinct from the bezel.
+let inset: CGFloat = 28
+let screen = bezel.insetBy(dx: inset, dy: inset)
+context.setFillColor(CGColor(srgbRed: 10.0 / 255.0, green: 20.0 / 255.0, blue: 60.0 / 255.0, alpha: 1))
+context.addPath(
+    CGPath(roundedRect: screen, cornerWidth: radius / 2, cornerHeight: radius / 2, transform: nil)
+)
+context.fillPath()
+
+// Stand plus base anchor the monitor without extra chrome.
+let standWidth: CGFloat = 96
+let standHeight: CGFloat = 120
+let stand = CGRect(
+    x: CGFloat(size) / 2 - standWidth / 2,
+    y: originY - standHeight + 20,
+    width: standWidth,
+    height: standHeight
+)
+context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+context.fill(stand)
+
+let baseWidth: CGFloat = 360
+let baseHeight: CGFloat = 32
+let base = CGRect(
+    x: CGFloat(size) / 2 - baseWidth / 2,
+    y: stand.minY - baseHeight,
+    width: baseWidth,
+    height: baseHeight
+)
+context.addPath(
+    CGPath(roundedRect: base, cornerWidth: baseHeight / 2, cornerHeight: baseHeight / 2, transform: nil)
+)
+context.fillPath()
 
 let outputURL = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()

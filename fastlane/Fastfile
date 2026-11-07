@@ -155,7 +155,7 @@ lane :screenshots_iphone do
     override_status_bar: true,
     clear_previous_screenshots: true,
     localize_simulator: false,
-    launch_arguments: ["-OuterViewScreenshots"]
+    launch_arguments: ["-ScreenVNCScreenshots"]
   )
 end
 
@@ -176,7 +176,7 @@ lane :screenshots_duo_outer do
     override_status_bar: true,
     clear_previous_screenshots: false,
     localize_simulator: false,
-    launch_arguments: ["-OuterViewScreenshots"]
+    launch_arguments: ["-ScreenVNCScreenshots"]
   )
 end
 
@@ -197,7 +197,7 @@ lane :screenshots_duo_inner do
       override_status_bar: true,
       clear_previous_screenshots: false,
       localize_simulator: false,
-      launch_arguments: ["-OuterViewScreenshots", "-OuterViewInnerDisplay"]
+      launch_arguments: ["-ScreenVNCScreenshots", "-ScreenVNCInnerDisplay"]
     )
   ensure
     Process.kill("TERM", watcher_pid) rescue nil
