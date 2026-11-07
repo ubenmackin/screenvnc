@@ -16,26 +16,26 @@ public struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("Viewer Defaults") {
-                    Picker("Default Display Mode", selection: $settings.defaultDisplayPreference) {
+                    Picker("Display Mode", selection: $settings.defaultDisplayPreference) {
                         ForEach(DisplayPreference.allCases, id: \.self) { pref in
                             Text(pref.displayName).tag(pref)
                         }
                     }
 
-                    Picker("Default Quality", selection: $settings.defaultQualityPreference) {
+                    Picker("Quality", selection: $settings.defaultQualityPreference) {
                         ForEach(QualityPreference.allCases, id: \.self) { qual in
                             Text(qual.displayName).tag(qual)
                         }
                     }
 
-                    Picker("Default Interaction Mode", selection: $settings.defaultPointerMode) {
+                    Picker("Mouse Mode", selection: $settings.defaultPointerMode) {
                         ForEach(PointerMode.allCases, id: \.self) { mode in
                             Text(mode.displayName).tag(mode)
                         }
                     }
                 }
 
-                if deviceMode != .mode1NormalPhone {
+                if DeviceModeDetector.isDuoDevice || deviceMode != .mode1NormalPhone {
                     Section("Foldable & Tabletop (iPhone Duo)") {
                         DisclosureGroup(isExpanded: $isTabletopExpanded) {
                             VStack(spacing: 8) {
@@ -98,7 +98,7 @@ public struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    if deviceMode == .mode3DuoOuterScreen {
+                    if DeviceModeDetector.isDuoDevice || deviceMode == .mode3DuoOuterScreen {
                         Button {
                             dismiss()
                         } label: {

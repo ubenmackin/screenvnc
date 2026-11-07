@@ -1,5 +1,6 @@
 // Rendering — Zoomable, pannable SwiftUI framebuffer canvas with direct touch and trackpad translation.
 import SwiftUI
+import UIKit
 
 public enum PointerMode: String, CaseIterable, Sendable, Codable {
     case directTouch
@@ -9,6 +10,43 @@ public enum PointerMode: String, CaseIterable, Sendable, Codable {
         switch self {
         case .directTouch: "Direct Touch"
         case .virtualTrackpad: "Virtual Trackpad"
+        }
+    }
+}
+
+/// Transparent overlay capturing two-finger taps for remote right-click.
+public struct TwoFingerTapView: UIViewRepresentable {
+    public var onTwoFingerTap: (CGPoint) -> Void
+
+    public init(onTwoFingerTap: @escaping (CGPoint) -> Void) {
+        self.onTwoFingerTap = onTwoFingerTap
+    }
+
+    public func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        let recognizer = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        recognizer.numberOfTouchesRequired = 2
+        recognizer.cancelsTouchesInView = false
+        view.addGestureRecognizer(recognizer)
+        return view
+    }
+
+    public func updateUIView(_: UIView, context _: Context) {}
+
+    public func makeCoordinator() -> Coordinator {
+        Coordinator(onTwoFingerTap: onTwoFingerTap)
+    }
+
+    public final class Coordinator: NSObject {
+        let onTwoFingerTap: (CGPoint) -> Void
+        init(onTwoFingerTap: @escaping (CGPoint) -> Void) {
+            self.onTwoFingerTap = onTwoFingerTap
+        }
+
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            let point = gesture.location(in: gesture.view)
+            onTwoFingerTap(point)
         }
     }
 }
@@ -81,6 +119,12 @@ public struct FramebufferView: View {
                         .shadow(radius: 2)
                         .allowsHitTesting(false)
                 }
+
+                // Two-finger tap detector overlay for right click
+                TwoFingerTapView { point in
+                    handleTwoFingerTap(at: point, in: geometry.size)
+                }
+                .allowsHitTesting(true)
             }
             .clipped()
         }
@@ -107,16 +151,18 @@ public struct FramebufferView: View {
     }
 
     private func handleDragChange(_ value: DragGesture.Value, in viewSize: CGSize) {
-        // View-only suppresses remote input, zoom stays local.
         guard !isInputDisabled else { return }
         if pointerMode == .directTouch {
             let remote = convertToRemote(point: value.location, in: viewSize)
-            // Hover/move cursor without holding mouse button down
             onPointerEvent(remote.x, remote.y, 0)
         } else {
-            // Trackpad relative motion
-            let deltaX = value.translation.width - lastPanOffset.width
-            let deltaY = value.translation.height - lastPanOffset.height
+            let geom = contentGeometry(in: viewSize)
+            let drawWidth = max(1.0, geom.size.width)
+            let scaleFactor = max(1.0, CGFloat(framebuffer.width) / drawWidth)
+
+            let deltaX = (value.translation.width - lastPanOffset.width) * scaleFactor
+            let deltaY = (value.translation.height - lastPanOffset.height) * scaleFactor
+
             virtualCursor.x = max(0, min(virtualCursor.x + deltaX, CGFloat(framebuffer.width - 1)))
             virtualCursor.y = max(0, min(virtualCursor.y + deltaY, CGFloat(framebuffer.height - 1)))
             lastPanOffset = value.translation
@@ -125,17 +171,21 @@ public struct FramebufferView: View {
     }
 
     private func handleDragEnd(_ value: DragGesture.Value, in viewSize: CGSize) {
-        // View-only suppresses remote input, zoom stays local.
         guard !isInputDisabled else { return }
         lastPanOffset = .zero
         let distance = hypot(value.translation.width, value.translation.height)
 
         if pointerMode == .directTouch {
-            let remote = convertToRemote(point: value.location, in: viewSize)
-            if distance < 6 {
-                // User performed a tap -> trigger left click (down then up)
-                onPointerEvent(remote.x, remote.y, 1)
+            let tapPoint = value.startLocation
+            let remote = convertToRemote(point: tapPoint, in: viewSize)
+            if distance < 8 {
+                // Direct touch tap: position cursor first, wait, down, wait, up
+                onPointerEvent(remote.x, remote.y, 0)
                 Task { @MainActor in
+                    do {
+                        try await Task.sleep(nanoseconds: 20_000_000)
+                    } catch {}
+                    onPointerEvent(remote.x, remote.y, 1)
                     do {
                         try await Task.sleep(nanoseconds: 50_000_000)
                     } catch {}
@@ -149,8 +199,12 @@ public struct FramebufferView: View {
             let posY = Int(virtualCursor.y)
             if distance < 6 {
                 // Tap on virtual trackpad -> trigger left click
-                onPointerEvent(posX, posY, 1)
+                onPointerEvent(posX, posY, 0)
                 Task { @MainActor in
+                    do {
+                        try await Task.sleep(nanoseconds: 20_000_000)
+                    } catch {}
+                    onPointerEvent(posX, posY, 1)
                     do {
                         try await Task.sleep(nanoseconds: 50_000_000)
                     } catch {}
@@ -162,53 +216,90 @@ public struct FramebufferView: View {
         }
     }
 
-    /// Converts remote macOS framebuffer pixel coordinates to SwiftUI view space.
-    public func convertToView(remotePoint: CGPoint, in viewSize: CGSize) -> CGPoint {
-        guard framebuffer.width > 0, framebuffer.height > 0, viewSize.width > 0, viewSize.height > 0 else {
-            return .zero
+    private func handleTwoFingerTap(at point: CGPoint, in viewSize: CGSize) {
+        guard !isInputDisabled else { return }
+        let (rx, ry): (Int, Int)
+        if pointerMode == .directTouch {
+            let remote = convertToRemote(point: point, in: viewSize)
+            rx = remote.x
+            ry = remote.y
+        } else {
+            rx = Int(virtualCursor.x)
+            ry = Int(virtualCursor.y)
         }
-        let frameAspect = CGFloat(framebuffer.width) / CGFloat(framebuffer.height)
+        // Send right click: move -> down with mask 4 (RFB button 3) -> wait -> up
+        onPointerEvent(rx, ry, 0)
+        Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            } catch {}
+            onPointerEvent(rx, ry, 4)
+            do {
+                try await Task.sleep(nanoseconds: 50_000_000)
+            } catch {}
+            onPointerEvent(rx, ry, 0)
+        }
+    }
+
+    /// Computes the exact frame geometry and draw scale for current display preference.
+    public func contentGeometry(in viewSize: CGSize) -> (origin: CGPoint, size: CGSize) {
+        guard framebuffer.width > 0, framebuffer.height > 0, viewSize.width > 0, viewSize.height > 0 else {
+            return (.zero, .zero)
+        }
+        let fbW = CGFloat(framebuffer.width)
+        let fbH = CGFloat(framebuffer.height)
+        let frameAspect = fbW / fbH
         let viewAspect = viewSize.width / viewSize.height
 
-        var drawWidth: CGFloat = viewSize.width
-        var drawHeight: CGFloat = viewSize.height
+        var drawWidth: CGFloat
+        var drawHeight: CGFloat
 
-        if frameAspect > viewAspect {
-            drawHeight = viewSize.width / frameAspect
-        } else {
-            drawWidth = viewSize.height * frameAspect
+        switch displayPreference {
+        case .fit:
+            if frameAspect > viewAspect {
+                drawWidth = viewSize.width
+                drawHeight = viewSize.width / frameAspect
+            } else {
+                drawWidth = viewSize.height * frameAspect
+                drawHeight = viewSize.height
+            }
+        case .fill:
+            if frameAspect > viewAspect {
+                drawWidth = viewSize.height * frameAspect
+                drawHeight = viewSize.height
+            } else {
+                drawWidth = viewSize.width
+                drawHeight = viewSize.width / frameAspect
+            }
+        case .actualSize:
+            drawWidth = fbW
+            drawHeight = fbH
         }
 
         let originX = (viewSize.width - drawWidth) / 2.0
         let originY = (viewSize.height - drawHeight) / 2.0
+        return (CGPoint(x: originX, y: originY), CGSize(width: drawWidth, height: drawHeight))
+    }
 
-        let viewX = originX + (remotePoint.x / CGFloat(framebuffer.width)) * drawWidth
-        let viewY = originY + (remotePoint.y / CGFloat(framebuffer.height)) * drawHeight
+    /// Converts remote macOS framebuffer pixel coordinates to SwiftUI view space.
+    public func convertToView(remotePoint: CGPoint, in viewSize: CGSize) -> CGPoint {
+        let geom = contentGeometry(in: viewSize)
+        guard framebuffer.width > 0, framebuffer.height > 0, geom.size.width > 0, geom.size.height > 0 else {
+            return .zero
+        }
+        let viewX = geom.origin.x + (remotePoint.x / CGFloat(framebuffer.width)) * geom.size.width
+        let viewY = geom.origin.y + (remotePoint.y / CGFloat(framebuffer.height)) * geom.size.height
         return CGPoint(x: viewX, y: viewY)
     }
 
     /// Normalizes SwiftUI view coordinates to remote macOS framebuffer pixel space.
     public func convertToRemote(point: CGPoint, in viewSize: CGSize) -> (x: Int, y: Int) {
-        guard framebuffer.width > 0, framebuffer.height > 0, viewSize.width > 0, viewSize.height > 0 else {
+        let geom = contentGeometry(in: viewSize)
+        guard framebuffer.width > 0, framebuffer.height > 0, geom.size.width > 0, geom.size.height > 0 else {
             return (0, 0)
         }
-        let frameAspect = CGFloat(framebuffer.width) / CGFloat(framebuffer.height)
-        let viewAspect = viewSize.width / viewSize.height
-
-        var drawWidth: CGFloat = viewSize.width
-        var drawHeight: CGFloat = viewSize.height
-
-        if frameAspect > viewAspect {
-            drawHeight = viewSize.width / frameAspect
-        } else {
-            drawWidth = viewSize.height * frameAspect
-        }
-
-        let originX = (viewSize.width - drawWidth) / 2.0
-        let originY = (viewSize.height - drawHeight) / 2.0
-
-        let relativeX = (point.x - originX) / drawWidth
-        let relativeY = (point.y - originY) / drawHeight
+        let relativeX = (point.x - geom.origin.x) / geom.size.width
+        let relativeY = (point.y - geom.origin.y) / geom.size.height
 
         let remoteX = Int(max(0.0, min(relativeX * CGFloat(framebuffer.width), CGFloat(framebuffer.width - 1))))
         let remoteY = Int(max(0.0, min(relativeY * CGFloat(framebuffer.height), CGFloat(framebuffer.height - 1))))

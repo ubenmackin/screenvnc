@@ -23,32 +23,33 @@ public struct ProfileRowView: View {
     }
 
     public var body: some View {
-        HStack {
-            Image(systemName: "display")
-                .font(.title3)
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 32)
+        Button {
+            onConnect()
+        } label: {
+            HStack {
+                Image(systemName: "display")
+                    .font(.title3)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 32)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(profile.name)
-                    .font(.headline)
-                Text("\(profile.host):\(String(profile.port)) • \(profile.authMethod.displayName)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.name)
+                        .font(.headline)
+                        .foregroundStyle(Color.primary)
+                    Text("\(profile.host):\(String(profile.port)) • \(profile.authMethod.displayName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-            Spacer()
+                Spacer()
 
-            Button {
-                onConnect()
-            } label: {
                 Image(systemName: "play.circle.fill")
                     .font(.title2)
                     .foregroundStyle(Color.accentColor)
             }
-            .buttonStyle(.plain)
+            .contentShape(Rectangle())
         }
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
         .contextMenu {
             Button("Edit") { onEdit() }
             Button(profile.isFavorite ? "Unfavorite" : "Favorite") { onToggleFavorite() }

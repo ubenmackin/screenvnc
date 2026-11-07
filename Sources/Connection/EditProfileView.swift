@@ -83,10 +83,28 @@ public struct EditProfileView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    if DeviceModeDetector.isDuoDevice {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                    } else {
+                        Button("Cancel") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { saveProfile() }
+                    if DeviceModeDetector.isDuoDevice {
+                        Button {
+                            saveProfile()
+                        } label: {
+                            Image(systemName: "checkmark")
+                                .font(.body.bold())
+                                .foregroundStyle(.blue)
+                        }
+                    } else {
+                        Button("Save") { saveProfile() }
+                    }
                 }
             }
             .alert("Validation Error", isPresented: Binding(
@@ -136,13 +154,18 @@ public struct EditProfileView: View {
             validationError = "Port must be a number between 1 and 65535."
             return
         }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUser = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+
         let profile = ConnectionProfile(
             id: profileToEdit?.id ?? UUID(),
-            name: name.isEmpty ? host : name,
-            host: host,
+            name: trimmedName.isEmpty ? trimmedHost : trimmedName,
+            host: trimmedHost,
             port: port,
             authMethod: authMethod,
-            username: username,
+            username: trimmedUser,
             displayPreference: displayPreference,
             qualityPreference: qualityPreference,
             pointerMode: pointerMode,
@@ -152,7 +175,7 @@ public struct EditProfileView: View {
 
         do {
             try profile.validate()
-            onSave(profile, password.isEmpty ? nil : password)
+            onSave(profile, trimmedPassword.isEmpty ? nil : trimmedPassword)
             dismiss()
         } catch {
             validationError = error.localizedDescription
