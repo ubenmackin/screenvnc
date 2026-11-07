@@ -1,11 +1,11 @@
-name: OuterView
+name: ScreenVNC
 options:
   bundleIdPrefix: com.volcrypt
   deploymentTarget:
     iOS: "27.1"
 
 targets:
-  OuterView:
+  ScreenVNC:
     type: application
     platform: iOS
     sources:
@@ -19,14 +19,14 @@ targets:
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
         INFOPLIST_FILE: Support/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: com.volcrypt.OuterView
+        PRODUCT_BUNDLE_IDENTIFIER: com.volcrypt.ScreenVNC
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: LYYD96F2J8
         IPHONEOS_DEPLOYMENT_TARGET: "27.1"
-        INFOPLIST_KEY_CFBundleDisplayName: "Outer View"
+        INFOPLIST_KEY_CFBundleDisplayName: "ScreenVNC"
         INFOPLIST_KEY_CKSharingSupported: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
@@ -34,7 +34,7 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        PRODUCT_NAME: OuterView
+        PRODUCT_NAME: ScreenVNC
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
@@ -46,53 +46,53 @@ targets:
           base:
             SWIFT_ENABLE_TESTABILITY: "YES"
 
-  OuterViewTests:
+  ScreenVNCTests:
     type: bundle.unit-test
     platform: iOS
     sources:
       - Tests
     dependencies:
-      - target: OuterView
+      - target: ScreenVNC
       - sdk: AppIntents.framework
     settings:
       base:
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
         GENERATE_INFOPLIST_FILE: "YES"
-        TEST_HOST: $(BUILT_PRODUCTS_DIR)/OuterView.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/OuterView
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/ScreenVNC.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ScreenVNC
         BUNDLE_LOADER: $(TEST_HOST)
         ENABLE_APP_INTENTS_METADATA_EXTRACTION: NO
         ENABLE_APP_INTENTS_METADATA_GENERATION: NO
 
-  OuterViewUITests:
+  ScreenVNCUITests:
     type: bundle.ui-testing
     platform: iOS
     sources:
-      - OuterViewUITests
+      - ScreenVNCUITests
     dependencies:
-      - target: OuterView
+      - target: ScreenVNC
     settings:
       base:
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
         GENERATE_INFOPLIST_FILE: "YES"
-        TEST_TARGET_NAME: OuterView
+        TEST_TARGET_NAME: ScreenVNC
         ENABLE_APP_INTENTS_METADATA_EXTRACTION: NO
         ENABLE_APP_INTENTS_METADATA_GENERATION: NO
 
 schemes:
-  OuterView:
+  ScreenVNC:
     build:
       targets:
-        OuterView: all
-        OuterViewTests: [test]
-        OuterViewUITests: [test]
+        ScreenVNC: all
+        ScreenVNCTests: [test]
+        ScreenVNCUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       testPlans:
-        - path: Support/TestPlans/OuterView.xctestplan
+        - path: Support/TestPlans/ScreenVNC.xctestplan
           defaultPlan: true
-        - path: Support/TestPlans/OuterViewFast.xctestplan
+        - path: Support/TestPlans/ScreenVNCFast.xctestplan
           defaultPlan: false
