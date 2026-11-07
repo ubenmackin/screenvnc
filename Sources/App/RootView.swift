@@ -2,6 +2,18 @@
 import os
 import SwiftUI
 
+extension [DiscoveredHost] {
+    /// Hides already-saved hosts so discovery lists only unsaved Macs.
+    func excludingSavedProfiles(_ profiles: [ConnectionProfile]) -> [DiscoveredHost] {
+        filter { host in
+            !profiles.contains { profile in
+                profile.host.caseInsensitiveCompare(host.host) == .orderedSame ||
+                    profile.name.caseInsensitiveCompare(host.name) == .orderedSame
+            }
+        }
+    }
+}
+
 public struct RootView: View {
     private var profileStore = ProfileStore.shared
     private var discoveryService = BonjourDiscoveryService.shared
@@ -13,6 +25,7 @@ public struct RootView: View {
     @State private var isPresentingNewProfile = false
     @State private var isPresentingSettings = false
     @State private var profileToEdit: ConnectionProfile?
+    @State private var currentDeviceMode: DeviceMode = .mode1NormalPhone
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -41,6 +54,12 @@ public struct RootView: View {
                         onConnectDiscovered: { connectDiscovered($0) }
                     )
                 }
+            }
+            .onAppear {
+                currentDeviceMode = mode
+            }
+            .onChange(of: geometry.size) { _, _ in
+                currentDeviceMode = mode
             }
         }
         .fullScreenCover(item: $activeSessionProfile) { profile in
@@ -73,11 +92,18 @@ public struct RootView: View {
             }
         }
         .sheet(isPresented: $isPresentingSettings) {
-            SettingsView()
+            SettingsView(deviceMode: currentDeviceMode)
         }
         .onAppear {
             if settings.autoDiscoverBonjour {
                 discoveryService.startDiscovery()
+            }
+        }
+        .onChange(of: settings.autoDiscoverBonjour) { _, isEnabled in
+            if isEnabled {
+                discoveryService.startDiscovery()
+            } else {
+                discoveryService.stopDiscovery()
             }
         }
     }
@@ -150,11 +176,19 @@ public struct RootView: View {
         }
     }
 
+    private var filteredDiscoveredHosts: [DiscoveredHost] {
+        discoveryService.discoveredHosts.excludingSavedProfiles(profileStore.profiles)
+    }
+
+    private var nonFavoriteProfiles: [ConnectionProfile] {
+        profileStore.profiles.filter { !$0.isFavorite }
+    }
+
     @ViewBuilder
     private var discoveredMacsSection: some View {
-        if !discoveryService.discoveredHosts.isEmpty {
+        if !filteredDiscoveredHosts.isEmpty {
             Section("Discovered Macs (Local Network)") {
-                ForEach(discoveryService.discoveredHosts) { host in
+                ForEach(filteredDiscoveredHosts) { host in
                     Button {
                         connectDiscovered(host)
                     } label: {
@@ -164,7 +198,7 @@ public struct RootView: View {
                             VStack(alignment: .leading) {
                                 Text(host.name)
                                     .font(.headline)
-                                Text("\(host.host):\(host.port)")
+                                Text("\(host.host):\(String(host.port))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -195,19 +229,22 @@ public struct RootView: View {
         }
     }
 
+    @ViewBuilder
     private var savedSessionsSection: some View {
-        Section("Saved Connections") {
-            if profileStore.profiles.isEmpty {
+        if profileStore.profiles.isEmpty {
+            Section("Saved Connections") {
                 Text("No saved profiles. Tap + to add a Mac connection.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            } else {
-                ForEach(profileStore.profiles) { profile in
+            }
+        } else if !nonFavoriteProfiles.isEmpty {
+            Section("Saved Connections") {
+                ForEach(nonFavoriteProfiles) { profile in
                     profileRow(profile)
                 }
                 .onDelete { indexSet in
                     for index in indexSet {
-                        profileStore.remove(id: profileStore.profiles[index].id)
+                        profileStore.remove(id: nonFavoriteProfiles[index].id)
                     }
                 }
             }
@@ -242,7 +279,10 @@ public struct RootView: View {
             name: host.name,
             host: host.host,
             port: host.port,
-            authMethod: .appleDH
+            authMethod: .vncDES,
+            displayPreference: settings.defaultDisplayPreference,
+            qualityPreference: settings.defaultQualityPreference,
+            pointerMode: settings.defaultPointerMode
         )
         profileToEdit = profile
     }

@@ -29,6 +29,10 @@ public final class SettingsStore {
         didSet { UserDefaults.standard.set(defaultQualityPreference.rawValue, forKey: "defaultQualityPreference") }
     }
 
+    public var defaultPointerMode: PointerMode {
+        didSet { UserDefaults.standard.set(defaultPointerMode.rawValue, forKey: "defaultPointerMode") }
+    }
+
     public var tabletopConsoleMode: TabletopConsoleMode {
         didSet { UserDefaults.standard.set(tabletopConsoleMode.rawValue, forKey: "tabletopConsoleMode") }
     }
@@ -53,6 +57,10 @@ public final class SettingsStore {
         let qualityDefault = QualityPreference.adaptive.rawValue
         let qualityRaw = UserDefaults.standard.string(forKey: "defaultQualityPreference") ?? qualityDefault
         defaultQualityPreference = QualityPreference(rawValue: qualityRaw) ?? .adaptive
+
+        let pointerDefault = PointerMode.directTouch.rawValue
+        let pointerRaw = UserDefaults.standard.string(forKey: "defaultPointerMode") ?? pointerDefault
+        defaultPointerMode = PointerMode(rawValue: pointerRaw) ?? .directTouch
 
         let tabletopDefault = TabletopConsoleMode.auto.rawValue
         let tabletopRaw = UserDefaults.standard.string(forKey: "tabletopConsoleMode") ?? tabletopDefault

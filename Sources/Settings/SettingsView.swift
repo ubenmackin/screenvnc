@@ -4,8 +4,13 @@ import SwiftUI
 public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable private var settings = SettingsStore.shared
+    public var deviceMode: DeviceMode
 
-    public init() {}
+    @State private var isTabletopExpanded: Bool = true
+
+    public init(deviceMode: DeviceMode = .mode1NormalPhone) {
+        self.deviceMode = deviceMode
+    }
 
     public var body: some View {
         NavigationStack {
@@ -22,21 +27,50 @@ public struct SettingsView: View {
                             Text(qual.displayName).tag(qual)
                         }
                     }
-                }
 
-                Section("Foldable & Tabletop (iPhone Duo)") {
-                    Picker("Tabletop Console Mode", selection: $settings.tabletopConsoleMode) {
-                        ForEach(TabletopConsoleMode.allCases, id: \.self) { mode in
+                    Picker("Default Interaction Mode", selection: $settings.defaultPointerMode) {
+                        ForEach(PointerMode.allCases, id: \.self) { mode in
                             Text(mode.displayName).tag(mode)
                         }
                     }
+                }
 
-                    Text(
-                        "In 'Always Full Canvas', the remote Mac desktop occupies the entire folding " +
-                            "display—ideal when using external Bluetooth keyboards and trackpads."
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                if deviceMode != .mode1NormalPhone {
+                    Section("Foldable & Tabletop (iPhone Duo)") {
+                        DisclosureGroup(isExpanded: $isTabletopExpanded) {
+                            VStack(spacing: 8) {
+                                tabletopOptionRow(
+                                    mode: .auto,
+                                    icon: "laptopcomputer",
+                                    title: "Automatic (Tabletop Hinge)",
+                                    description: "Dynamically switches between full canvas and split console based on the folding hinge posture angle."
+                                )
+
+                                tabletopOptionRow(
+                                    mode: .alwaysFullCanvas,
+                                    icon: "display",
+                                    title: "Always Full Canvas (BT Keyboard)",
+                                    description: "Remote Mac desktop occupies the entire folding display—ideal when using external Bluetooth keyboards and trackpads."
+                                )
+
+                                tabletopOptionRow(
+                                    mode: .alwaysSplitConsole,
+                                    icon: "rectangle.split.2x1",
+                                    title: "Always Split Console",
+                                    description: "Remote Mac desktop stays on the upper half, with a virtual trackpad and Mac shortcuts fixed on the lower half."
+                                )
+                            }
+                            .padding(.vertical, 4)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Tabletop Console Mode")
+                                    .font(.body.bold())
+                                Text(settings.tabletopConsoleMode.displayName)
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                    }
                 }
 
                 Section("Security & Network") {
@@ -64,9 +98,66 @@ public struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    if deviceMode == .mode3DuoOuterScreen {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "checkmark")
+                                .font(.body.bold())
+                                .foregroundStyle(.blue)
+                        }
+                    } else {
+                        Button("Done") {
+                            dismiss()
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private func tabletopOptionRow(
+        mode: TabletopConsoleMode,
+        icon: String,
+        title: String,
+        description: String
+    ) -> some View {
+        let isSelected = settings.tabletopConsoleMode == mode
+        return Button {
+            settings.tabletopConsoleMode = mode
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: isSelected ? "circle.inset.filled" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .padding(.top, 2)
+
+                Image(systemName: icon)
+                    .font(.body)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .frame(width: 22)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(Color.primary)
+                    Text(description)
+                        .font(.footnote)
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color(uiColor: .tertiarySystemFill))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }

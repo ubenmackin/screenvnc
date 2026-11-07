@@ -86,6 +86,7 @@ public actor VNCClient {
         try await executeHandshake(profile: profile, password: password)
         isRunning = true
         await updateState(.connected)
+        requestFramebufferUpdate(incremental: false)
 
         Task {
             await self.startReceiveLoop()
@@ -210,8 +211,8 @@ public actor VNCClient {
         let header = try await readExact(3)
         let numRects = Int((UInt16(header[1]) << 8) | UInt16(header[2]))
         // Bound rect batch before looping; fail closed on excess.
-        guard numRects <= 50 else {
-            throw VNCAuthError.authenticationRejected("Framebuffer update has too many rects.")
+        guard numRects <= 10000 else {
+            throw VNCAuthError.authenticationRejected("Framebuffer update has too many rects: \(numRects).")
         }
 
         for _ in 0 ..< numRects {
@@ -302,18 +303,34 @@ public actor VNCClient {
     }
 
     func readExact(_ count: Int) async throws -> Data {
+        guard count > 0 else { return Data() }
+        var buffer = Data()
+        buffer.reserveCapacity(count)
+
+        while buffer.count < count {
+            let needed = count - buffer.count
+            let chunkSize = min(needed, 65536)
+            let chunk = try await readChunk(minBytes: 1, maxBytes: chunkSize)
+            guard !chunk.isEmpty else {
+                throw CancellationError()
+            }
+            buffer.append(chunk)
+        }
+        return buffer
+    }
+
+    private func readChunk(minBytes: Int, maxBytes: Int) async throws -> Data {
         guard let connection else { throw CancellationError() }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                connection.receive(minimumIncompleteLength: count, maximumLength: count) { data, _, isComplete, error in
+                connection.receive(minimumIncompleteLength: minBytes, maximumLength: maxBytes) { data, _, isComplete, error in
                     if let error {
                         continuation.resume(throwing: error)
-                    } else if let data, data.count == count {
+                    } else if let data, !data.isEmpty {
                         continuation.resume(returning: data)
                     } else if isComplete {
                         continuation.resume(throwing: CancellationError())
                     } else {
-                        // Guarantee resume on short reads; hanging tasks leak continuations.
                         continuation.resume(throwing: CancellationError())
                     }
                 }

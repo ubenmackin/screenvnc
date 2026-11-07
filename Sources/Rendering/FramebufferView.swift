@@ -1,7 +1,7 @@
 // Rendering — Zoomable, pannable SwiftUI framebuffer canvas with direct touch and trackpad translation.
 import SwiftUI
 
-public enum PointerMode: String, CaseIterable, Sendable {
+public enum PointerMode: String, CaseIterable, Sendable, Codable {
     case directTouch
     case virtualTrackpad
 
@@ -71,12 +71,13 @@ public struct FramebufferView: View {
                 }
 
                 if pointerMode == .virtualTrackpad {
-                    // Local virtual cursor indicator
+                    // Local virtual cursor indicator mapped to view space
+                    let viewPos = convertToView(remotePoint: virtualCursor, in: geometry.size)
                     Circle()
                         .fill(Color.white.opacity(0.85))
                         .frame(width: 14, height: 14)
                         .overlay(Circle().stroke(Color.black, lineWidth: 1.5))
-                        .position(x: virtualCursor.x, y: virtualCursor.y)
+                        .position(x: viewPos.x, y: viewPos.y)
                         .shadow(radius: 2)
                         .allowsHitTesting(false)
                 }
@@ -110,13 +111,14 @@ public struct FramebufferView: View {
         guard !isInputDisabled else { return }
         if pointerMode == .directTouch {
             let remote = convertToRemote(point: value.location, in: viewSize)
-            onPointerEvent(remote.x, remote.y, 1) // Button 1 pressed while dragging
+            // Hover/move cursor without holding mouse button down
+            onPointerEvent(remote.x, remote.y, 0)
         } else {
             // Trackpad relative motion
             let deltaX = value.translation.width - lastPanOffset.width
             let deltaY = value.translation.height - lastPanOffset.height
-            virtualCursor.x = max(0, min(virtualCursor.x + deltaX, CGFloat(framebuffer.width)))
-            virtualCursor.y = max(0, min(virtualCursor.y + deltaY, CGFloat(framebuffer.height)))
+            virtualCursor.x = max(0, min(virtualCursor.x + deltaX, CGFloat(framebuffer.width - 1)))
+            virtualCursor.y = max(0, min(virtualCursor.y + deltaY, CGFloat(framebuffer.height - 1)))
             lastPanOffset = value.translation
             onPointerEvent(Int(virtualCursor.x), Int(virtualCursor.y), 0)
         }
@@ -126,12 +128,63 @@ public struct FramebufferView: View {
         // View-only suppresses remote input, zoom stays local.
         guard !isInputDisabled else { return }
         lastPanOffset = .zero
+        let distance = hypot(value.translation.width, value.translation.height)
+
         if pointerMode == .directTouch {
             let remote = convertToRemote(point: value.location, in: viewSize)
-            onPointerEvent(remote.x, remote.y, 0) // Button released
+            if distance < 6 {
+                // User performed a tap -> trigger left click (down then up)
+                onPointerEvent(remote.x, remote.y, 1)
+                Task { @MainActor in
+                    do {
+                        try await Task.sleep(nanoseconds: 50_000_000)
+                    } catch {}
+                    onPointerEvent(remote.x, remote.y, 0)
+                }
+            } else {
+                onPointerEvent(remote.x, remote.y, 0)
+            }
         } else {
-            onPointerEvent(Int(virtualCursor.x), Int(virtualCursor.y), 0)
+            let posX = Int(virtualCursor.x)
+            let posY = Int(virtualCursor.y)
+            if distance < 6 {
+                // Tap on virtual trackpad -> trigger left click
+                onPointerEvent(posX, posY, 1)
+                Task { @MainActor in
+                    do {
+                        try await Task.sleep(nanoseconds: 50_000_000)
+                    } catch {}
+                    onPointerEvent(posX, posY, 0)
+                }
+            } else {
+                onPointerEvent(posX, posY, 0)
+            }
         }
+    }
+
+    /// Converts remote macOS framebuffer pixel coordinates to SwiftUI view space.
+    public func convertToView(remotePoint: CGPoint, in viewSize: CGSize) -> CGPoint {
+        guard framebuffer.width > 0, framebuffer.height > 0, viewSize.width > 0, viewSize.height > 0 else {
+            return .zero
+        }
+        let frameAspect = CGFloat(framebuffer.width) / CGFloat(framebuffer.height)
+        let viewAspect = viewSize.width / viewSize.height
+
+        var drawWidth: CGFloat = viewSize.width
+        var drawHeight: CGFloat = viewSize.height
+
+        if frameAspect > viewAspect {
+            drawHeight = viewSize.width / frameAspect
+        } else {
+            drawWidth = viewSize.height * frameAspect
+        }
+
+        let originX = (viewSize.width - drawWidth) / 2.0
+        let originY = (viewSize.height - drawHeight) / 2.0
+
+        let viewX = originX + (remotePoint.x / CGFloat(framebuffer.width)) * drawWidth
+        let viewY = originY + (remotePoint.y / CGFloat(framebuffer.height)) * drawHeight
+        return CGPoint(x: viewX, y: viewY)
     }
 
     /// Normalizes SwiftUI view coordinates to remote macOS framebuffer pixel space.

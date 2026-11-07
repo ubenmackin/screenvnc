@@ -7,11 +7,10 @@ extension VNCClient {
     func executeHandshake(profile: ConnectionProfile, password: String?) async throws {
         try await performVersionHandshake()
         let selectedType = try await performSecurityNegotiation(preferred: profile.authMethod, host: profile.host)
-        try await authenticate(securityType: selectedType, password: password, host: profile.host)
+        try await authenticate(securityType: selectedType, profile: profile, password: password, host: profile.host)
         try await performServerInit()
         try await sendPixelFormat()
         try await sendSupportedEncodings()
-        requestFramebufferUpdate(incremental: false)
     }
 
     private func performVersionHandshake() async throws {
@@ -75,7 +74,12 @@ extension VNCClient {
         return selectedType
     }
 
-    private func authenticate(securityType: RFBConstants.SecurityType, password: String?, host: String) async throws {
+    private func authenticate(
+        securityType: RFBConstants.SecurityType,
+        profile: ConnectionProfile,
+        password: String?,
+        host: String
+    ) async throws {
         switch securityType {
         case .none:
             // None auth is loopback-only; reject remote unauthenticated sessions.
@@ -94,8 +98,48 @@ extension VNCClient {
                 throw VNCAuthError.authenticationRejected("Invalid VNC password.")
             }
         case .appleDH:
-            // DH exchange needs credential send; fail closed until wired.
-            throw VNCAuthError.authenticationRejected("Apple DH exchange not implemented.")
+            let paramHeader = try await readExact(4)
+            guard let firstByte = paramHeader.first else {
+                throw VNCAuthError.authenticationRejected("Incomplete Apple DH parameters.")
+            }
+            let generator = (UInt16(firstByte) << 8) | UInt16(paramHeader[1])
+            let keyLength = Int((UInt16(paramHeader[2]) << 8) | UInt16(paramHeader[3]))
+            guard keyLength > 0, keyLength <= 1024 else {
+                throw VNCAuthError.authenticationRejected("Invalid Apple DH key length: \(keyLength)")
+            }
+
+            let primeData = try await readExact(keyLength)
+            let serverPubKeyData = try await readExact(keyLength)
+
+            let (privateKey, clientPubKey) = try SecurityHandler.generateAppleDHEphemeralKeyPair(
+                generator: generator,
+                primeData: primeData,
+                keyLength: keyLength
+            )
+
+            try await sendExact(clientPubKey)
+
+            let sharedSecret = try SecurityHandler.computeAppleDHSharedSecret(
+                serverPublicKeyData: serverPubKeyData,
+                privateKey: privateKey,
+                primeData: primeData,
+                keyLength: keyLength
+            )
+
+            let aesKey = SecurityHandler.deriveAppleDHAESKey(sharedSecret: sharedSecret)
+            let encryptedCreds = try SecurityHandler.prepareAppleDHCredentials(
+                username: profile.username,
+                password: password ?? "",
+                aesKey: aesKey
+            )
+
+            try await sendExact(encryptedCreds)
+
+            let resultData = try await readExact(4)
+            let result = resultData.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
+            if result != 0 {
+                throw VNCAuthError.authenticationRejected("Invalid macOS username or password.")
+            }
         default:
             throw VNCAuthError.unsupportedSecurityType(securityType.rawValue)
         }
@@ -144,10 +188,17 @@ extension VNCClient {
         host: String
     ) throws -> RFBConstants.SecurityType {
         let types = Set(serverTypes.map(\.self))
-        // AppleDH needs DH exchange; skip selection until send is wired.
-        _ = preferred
+        if preferred == .appleDH, types.contains(RFBConstants.SecurityType.appleDH.rawValue) {
+            return .appleDH
+        }
+        if preferred == .vncDES, types.contains(RFBConstants.SecurityType.vncAuth.rawValue) {
+            return .vncAuth
+        }
         if types.contains(RFBConstants.SecurityType.vncAuth.rawValue) {
             return .vncAuth
+        }
+        if types.contains(RFBConstants.SecurityType.appleDH.rawValue) {
+            return .appleDH
         }
         // Offer None only to loopback hosts; otherwise treat as no mutual support.
         if types.contains(RFBConstants.SecurityType.none.rawValue), isLoopbackHost(host) {

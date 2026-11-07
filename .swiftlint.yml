@@ -4,6 +4,7 @@ excluded:
   - Build
   - build
   - .build
+  - Sources/VNC/BigUInt.swift
 
 custom_rules:
   discouraged_optional_try:

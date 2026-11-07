@@ -9,11 +9,12 @@ public struct EditProfileView: View {
     @State private var name: String = ""
     @State private var host: String = ""
     @State private var portString: String = "5900"
-    @State private var authMethod: AuthMethod = .appleDH
+    @State private var authMethod: AuthMethod = .vncDES
     @State private var username: String = ""
     @State private var password: String = ""
     @State private var displayPreference: DisplayPreference = .fit
     @State private var qualityPreference: QualityPreference = .adaptive
+    @State private var pointerMode: PointerMode = .directTouch
     @State private var isFavorite: Bool = false
     @State private var requiresBiometrics: Bool = false
     @State private var validationError: String?
@@ -65,6 +66,12 @@ public struct EditProfileView: View {
                             Text(qual.displayName).tag(qual)
                         }
                     }
+
+                    Picker("Interaction Mode", selection: $pointerMode) {
+                        ForEach(PointerMode.allCases, id: \.self) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
                 }
 
                 Section("Preferences") {
@@ -109,14 +116,26 @@ public struct EditProfileView: View {
             username = existingProfile.username
             displayPreference = existingProfile.displayPreference
             qualityPreference = existingProfile.qualityPreference
+            pointerMode = existingProfile.pointerMode ?? SettingsStore.shared.defaultPointerMode
             isFavorite = existingProfile.isFavorite
             requiresBiometrics = existingProfile.requiresBiometrics
             password = KeychainManager.shared.getPassword(for: existingProfile.id) ?? ""
+        } else {
+            let settings = SettingsStore.shared
+            displayPreference = settings.defaultDisplayPreference
+            qualityPreference = settings.defaultQualityPreference
+            pointerMode = settings.defaultPointerMode
+            authMethod = .vncDES
         }
     }
 
     private func saveProfile() {
-        let port = Int(portString) ?? 5900
+        // Reject non-numeric ports instead of falling back; silent defaults hide typos.
+        let trimmedPort = portString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let port = Int(trimmedPort) else {
+            validationError = "Port must be a number between 1 and 65535."
+            return
+        }
         let profile = ConnectionProfile(
             id: profileToEdit?.id ?? UUID(),
             name: name.isEmpty ? host : name,
@@ -126,6 +145,7 @@ public struct EditProfileView: View {
             username: username,
             displayPreference: displayPreference,
             qualityPreference: qualityPreference,
+            pointerMode: pointerMode,
             isFavorite: isFavorite,
             requiresBiometrics: requiresBiometrics
         )

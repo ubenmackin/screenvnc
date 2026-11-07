@@ -103,14 +103,15 @@ public struct CoverScreenView: View {
 
     @ViewBuilder
     private var discoveredMacsView: some View {
-        if !discoveryService.discoveredHosts.isEmpty {
+        let filtered = discoveryService.discoveredHosts.excludingSavedProfiles(profileStore.profiles)
+        if !filtered.isEmpty {
             Text("Discovered Macs")
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
                 .padding(.horizontal)
 
             VStack(spacing: 8) {
-                ForEach(discoveryService.discoveredHosts) { host in
+                ForEach(filtered) { host in
                     Button {
                         onConnectDiscovered(host)
                     } label: {
