@@ -4,7 +4,7 @@ import SwiftUI
 public struct EditProfileView: View {
     @Environment(\.dismiss) private var dismiss
     public var profileToEdit: ConnectionProfile?
-    public var onSave: (ConnectionProfile, String?) -> Void
+    public var onSave: @MainActor (ConnectionProfile, String?) -> Void
 
     @State private var name: String = ""
     @State private var host: String = ""
@@ -18,7 +18,7 @@ public struct EditProfileView: View {
     @State private var requiresBiometrics: Bool = false
     @State private var validationError: String?
 
-    public init(profileToEdit: ConnectionProfile? = nil, onSave: @escaping (ConnectionProfile, String?) -> Void) {
+    public init(profileToEdit: ConnectionProfile? = nil, onSave: @escaping @MainActor (ConnectionProfile, String?) -> Void) {
         self.profileToEdit = profileToEdit
         self.onSave = onSave
     }

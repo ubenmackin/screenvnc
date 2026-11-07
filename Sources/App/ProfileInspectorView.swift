@@ -3,17 +3,17 @@ import SwiftUI
 
 public struct ProfileRowView: View {
     public let profile: ConnectionProfile
-    public var onConnect: () -> Void
-    public var onEdit: () -> Void
-    public var onToggleFavorite: () -> Void
-    public var onDelete: () -> Void
+    public var onConnect: @MainActor () -> Void
+    public var onEdit: @MainActor () -> Void
+    public var onToggleFavorite: @MainActor () -> Void
+    public var onDelete: @MainActor () -> Void
 
     public init(
         profile: ConnectionProfile,
-        onConnect: @escaping () -> Void,
-        onEdit: @escaping () -> Void,
-        onToggleFavorite: @escaping () -> Void,
-        onDelete: @escaping () -> Void
+        onConnect: @escaping @MainActor () -> Void,
+        onEdit: @escaping @MainActor () -> Void,
+        onToggleFavorite: @escaping @MainActor () -> Void,
+        onDelete: @escaping @MainActor () -> Void
     ) {
         self.profile = profile
         self.onConnect = onConnect
@@ -59,9 +59,9 @@ public struct ProfileRowView: View {
 
 public struct ProfileInspectorView: View {
     public let profile: ConnectionProfile
-    public var onConnect: () -> Void
+    public var onConnect: @MainActor () -> Void
 
-    public init(profile: ConnectionProfile, onConnect: @escaping () -> Void) {
+    public init(profile: ConnectionProfile, onConnect: @escaping @MainActor () -> Void) {
         self.profile = profile
         self.onConnect = onConnect
     }

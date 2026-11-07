@@ -3,7 +3,7 @@ import SwiftUI
 
 public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var settings = SettingsStore.shared
+    @Bindable private var settings = SettingsStore.shared
 
     public init() {}
 

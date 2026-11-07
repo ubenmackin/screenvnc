@@ -3,18 +3,18 @@ import SwiftUI
 
 public struct OuterScreenRailView: View {
     @Binding public var activeModifiers: Set<MacKey>
-    public var onKeyPress: (UInt32, Bool) -> Void
-    public var onSendShortcut: (String) -> Void
-    public var onToggleDisplayPreference: () -> Void
-    public var onDisconnect: () -> Void
+    public var onKeyPress: @MainActor (UInt32, Bool) -> Void
+    public var onSendShortcut: @MainActor (String) -> Void
+    public var onToggleDisplayPreference: @MainActor () -> Void
+    public var onDisconnect: @MainActor () -> Void
     public var isInputDisabled: Bool = false
 
     public init(
         activeModifiers: Binding<Set<MacKey>>,
-        onKeyPress: @escaping (UInt32, Bool) -> Void,
-        onSendShortcut: @escaping (String) -> Void,
-        onToggleDisplayPreference: @escaping () -> Void,
-        onDisconnect: @escaping () -> Void,
+        onKeyPress: @escaping @MainActor (UInt32, Bool) -> Void,
+        onSendShortcut: @escaping @MainActor (String) -> Void,
+        onToggleDisplayPreference: @escaping @MainActor () -> Void,
+        onDisconnect: @escaping @MainActor () -> Void,
         isInputDisabled: Bool = false
     ) {
         _activeModifiers = activeModifiers

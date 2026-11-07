@@ -1,10 +1,12 @@
 // App — Main multi-mode root navigation adapting to iPhone, iPad, and iPhone Duo.
+import os
 import SwiftUI
 
 public struct RootView: View {
-    @ObservedObject private var profileStore = ProfileStore.shared
-    @ObservedObject private var discoveryService = BonjourDiscoveryService.shared
-    @ObservedObject private var settings = SettingsStore.shared
+    private var profileStore = ProfileStore.shared
+    private var discoveryService = BonjourDiscoveryService.shared
+    private var settings = SettingsStore.shared
+    private let logger = Logger(subsystem: "com.volcrypt.ScreenVNC", category: "RootView")
 
     @State private var selectedProfile: ConnectionProfile?
     @State private var activeSessionProfile: ConnectionProfile?
@@ -53,7 +55,7 @@ public struct RootView: View {
                     do {
                         try KeychainManager.shared.savePassword(password, for: profile.id)
                     } catch {
-                        // Non-fatal credential storage error
+                        logger.error("Failed to save credentials for profile \(profile.id): \(error.localizedDescription)")
                     }
                 }
             }
@@ -65,7 +67,7 @@ public struct RootView: View {
                     do {
                         try KeychainManager.shared.savePassword(password, for: updated.id)
                     } catch {
-                        // Non-fatal credential storage error
+                        logger.error("Failed to save credentials for updated profile \(updated.id): \(error.localizedDescription)")
                     }
                 }
             }
