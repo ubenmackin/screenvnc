@@ -115,3 +115,29 @@ guard CGImageDestinationFinalize(destination) else {
 }
 
 print("Wrote \(outputURL.path)")
+
+let contentsURL = outputURL.deletingLastPathComponent().appendingPathComponent("Contents.json")
+let contentsJSON = """
+{
+  "images" : [
+    {
+      "filename" : "AppIcon-1024.png",
+      "idiom" : "universal",
+      "platform" : "ios",
+      "size" : "1024x1024"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
+
+"""
+
+do {
+    try contentsJSON.write(to: contentsURL, atomically: true, encoding: .utf8)
+    print("Wrote \(contentsURL.path)")
+} catch {
+    fatalError("Failed writing Contents.json to \(contentsURL.path): \(error)")
+}
