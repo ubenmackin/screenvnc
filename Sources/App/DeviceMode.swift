@@ -22,6 +22,31 @@ public enum HingePosture: String, Sendable {
 }
 
 public enum DeviceModeDetector {
+    /// Detects if the current running device is an iPhone Duo (foldable) hardware or simulator.
+    public static var isDuoDevice: Bool {
+        #if targetEnvironment(simulator)
+            let simName = ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"] ?? ""
+            let simModel = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? ""
+            if simName.localizedCaseInsensitiveContains("duo") || simModel.contains("iPhone19,") {
+                return true
+            }
+        #endif
+        let deviceName = UIDevice.current.name
+        if deviceName.localizedCaseInsensitiveContains("duo") {
+            return true
+        }
+        let bounds = UIScreen.main.bounds
+        let maxDim = max(bounds.width, bounds.height)
+        let minDim = min(bounds.width, bounds.height)
+        if minDim > 0 {
+            let ratio = maxDim / minDim
+            if UIDevice.current.userInterfaceIdiom == .phone, ratio < 1.65 {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Classifies device modes from SwiftUI environment traits, screen geometry, and hinge angle.
     public static func detectMode(
         horizontalSizeClass: UserInterfaceSizeClass?,
@@ -29,17 +54,21 @@ public enum DeviceModeDetector {
         screenSize: CGSize,
         hingeAngle _: Double = 180.0
     ) -> DeviceMode {
-        // Mode 2: iPad or iPhone Duo Unfolded Inner Screen (regular width + regular height, or flat wide canvas)
+        // Mode 2: iPad or iPhone Duo Unfolded Inner Screen (regular width + regular height)
         if horizontalSizeClass == .regular && verticalSizeClass == .regular {
             return .mode2InnerDisplayOrPad
+        }
+
+        // iPhone Duo hardware / simulator folded outer display maps to Mode 3
+        if isDuoDevice {
+            return .mode3DuoOuterScreen
         }
 
         let maxDim = max(screenSize.width, screenSize.height)
         let minDim = min(screenSize.width, screenSize.height)
         let aspectRatio = minDim > 0 ? (maxDim / minDim) : 1.7
 
-        // Mode 3: iPhone Duo Outer Screen has a shorter, passport-style aspect ratio (~1.45:1).
-        // Standard modern iPhones have elongated aspect ratios (~19.5:9 or > 2.0:1).
+        // Aspect ratio fallback for outer screen if simulated without model identifier
         if aspectRatio < 1.65, horizontalSizeClass == .compact || verticalSizeClass == .compact {
             return .mode3DuoOuterScreen
         }

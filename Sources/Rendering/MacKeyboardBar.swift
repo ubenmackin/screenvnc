@@ -11,7 +11,7 @@ public enum MacKey: UInt32, CaseIterable, Identifiable {
     case arrowUp = 0xFF52
     case arrowRight = 0xFF53
     case arrowDown = 0xFF54
-    case command = 0xFFE7
+    case command = 0xFFEB
     case option = 0xFFE9
     case control = 0xFFE3
     case shift = 0xFFE1

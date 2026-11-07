@@ -1,16 +1,23 @@
 // Rendering — Primary active remote desktop session viewer and mode adapter.
 import os
 import SwiftUI
+import UIKit
 
 /// Session delegate bridges actor callbacks onto MainActor framebuffer.
 @MainActor
 private final class SessionClientBridge: VNCClientDelegate {
     private let framebuffer: Framebuffer
     private let onStateChange: @MainActor (VNCConnectionState) -> Void
+    private let onCutText: @MainActor (String) -> Void
 
-    init(framebuffer: Framebuffer, onStateChange: @escaping @MainActor (VNCConnectionState) -> Void) {
+    init(
+        framebuffer: Framebuffer,
+        onStateChange: @escaping @MainActor (VNCConnectionState) -> Void,
+        onCutText: @escaping @MainActor (String) -> Void
+    ) {
         self.framebuffer = framebuffer
         self.onStateChange = onStateChange
+        self.onCutText = onCutText
     }
 
     func vncClient(_ _: VNCClient, didUpdateState state: VNCConnectionState) {
@@ -30,7 +37,79 @@ private final class SessionClientBridge: VNCClientDelegate {
     }
 
     func vncClient(_ _: VNCClient, didReceiveCutText text: String) {
-        UIPasteboard.general.string = text
+        // Stage server text for explicit user consent; never touch pasteboard here.
+        onCutText(text)
+    }
+}
+
+/// Transparent view bridging the system software keyboard to remote VNC key events.
+public struct SoftwareKeyboardResponder: UIViewRepresentable {
+    @Binding public var isActive: Bool
+    public var onCharacter: @MainActor (Character) -> Void
+    public var onDeleteBackward: @MainActor () -> Void
+
+    public init(
+        isActive: Binding<Bool>,
+        onCharacter: @escaping @MainActor (Character) -> Void,
+        onDeleteBackward: @escaping @MainActor () -> Void
+    ) {
+        _isActive = isActive
+        self.onCharacter = onCharacter
+        self.onDeleteBackward = onDeleteBackward
+    }
+
+    public func makeUIView(context _: Context) -> KeyInputView {
+        let view = KeyInputView()
+        view.onCharacter = onCharacter
+        view.onDeleteBackward = onDeleteBackward
+        return view
+    }
+
+    public func updateUIView(_ uiView: KeyInputView, context _: Context) {
+        uiView.onCharacter = onCharacter
+        uiView.onDeleteBackward = onDeleteBackward
+        if isActive, !uiView.isFirstResponder {
+            DispatchQueue.main.async {
+                uiView.becomeFirstResponder()
+            }
+        } else if !isActive, uiView.isFirstResponder {
+            DispatchQueue.main.async {
+                uiView.resignFirstResponder()
+            }
+        }
+    }
+
+    public final class KeyInputView: UIView, UIKeyInput {
+        public var hasText: Bool {
+            true
+        }
+
+        var onCharacter: (@MainActor (Character) -> Void)?
+        var onDeleteBackward: (@MainActor () -> Void)?
+
+        override public var canBecomeFirstResponder: Bool {
+            true
+        }
+
+        public var autocorrectionType: UITextAutocorrectionType = .no
+        public var autocapitalizationType: UITextAutocapitalizationType = .none
+        public var smartQuotesType: UITextSmartQuotesType = .no
+        public var smartDashesType: UITextSmartDashesType = .no
+        public var keyboardType: UIKeyboardType = .asciiCapable
+
+        public func insertText(_ text: String) {
+            Task { @MainActor [weak self] in
+                for char in text {
+                    self?.onCharacter?(char)
+                }
+            }
+        }
+
+        public func deleteBackward() {
+            Task { @MainActor [weak self] in
+                self?.onDeleteBackward?()
+            }
+        }
     }
 }
 
@@ -46,8 +125,11 @@ public struct InSessionView: View {
     @State private var displayPreference: DisplayPreference
     @State private var pointerMode: PointerMode
     @State private var isTabletopConsoleEnabled: Bool
+    @State private var isToolbarCollapsed: Bool = false
+    @State private var isKeyboardActive: Bool = false
     @State private var connectionState: VNCConnectionState = .connecting
     @State private var errorMessage: String?
+    @State private var pendingServerCutText: String?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -86,8 +168,19 @@ public struct InSessionView: View {
                 case .mode3DuoOuterScreen:
                     mode3Layout(geometry: geometry)
                 }
+
+                // Invisible software keyboard input responder
+                SoftwareKeyboardResponder(
+                    isActive: $isKeyboardActive,
+                    onCharacter: handleTypedCharacter,
+                    onDeleteBackward: handleBackspace
+                )
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
             }
         }
+        .ignoresSafeArea()
         .task {
             await startSession()
         }
@@ -98,7 +191,8 @@ public struct InSessionView: View {
             get: { errorMessage != nil },
             set: {
                 if !$0 {
-                    errorMessage = nil; onDismiss()
+                    errorMessage = nil
+                    onDismiss()
                 }
             }
         )) {
@@ -106,12 +200,35 @@ public struct InSessionView: View {
         } message: {
             Text(errorMessage ?? "An unknown error occurred.")
         }
+        .alert(
+            "Copy from Mac?",
+            isPresented: Binding(
+                get: { pendingServerCutText != nil },
+                set: {
+                    if !$0 {
+                        pendingServerCutText = nil
+                    }
+                }
+            )
+        ) {
+            // Pasteboard writes only on explicit tap; dismiss drops server text.
+            Button("Copy") {
+                if let text = pendingServerCutText {
+                    UIPasteboard.general.string = text
+                }
+                pendingServerCutText = nil
+            }
+            Button("Dismiss", role: .cancel) {
+                pendingServerCutText = nil
+            }
+        } message: {
+            Text("The Mac copied text. Copy it to this device's clipboard?")
+        }
     }
 
-    /// Mode 1: Standard Phone — fitted canvas with bottom floating auto-collapsible Mac bar.
+    /// Mode 1: Standard Phone — edge-to-edge canvas with unified collapsible floating dock.
     private func mode1Layout(geometry _: GeometryProxy) -> some View {
-        VStack(spacing: 0) {
-            topSessionBar
+        ZStack(alignment: .bottom) {
             FramebufferView(
                 framebuffer: framebuffer,
                 displayPreference: displayPreference,
@@ -119,26 +236,18 @@ public struct InSessionView: View {
                 onPointerEvent: handlePointerEvent,
                 isInputDisabled: settings.viewOnly
             )
-            if settings.viewOnly {
-                // View-only banner replaces input bar.
-                viewOnlyBanner
-            } else {
-                MacKeyboardBar(
-                    activeModifiers: $activeModifiers,
-                    onKeyPress: handleKeyPress,
-                    onSendShortcut: handleShortcut
-                )
-            }
+            .ignoresSafeArea()
+
+            unifiedSessionDock
+                .padding(.bottom, 12)
+                .padding(.horizontal, 10)
         }
     }
 
-    /// Mode 2: iPad or Duo Inner Screen — expandable full canvas with toggleable tabletop split console.
+    /// Mode 2: iPad or Duo Inner Screen — full canvas with optional tabletop console split.
     private func mode2Layout(geometry: GeometryProxy) -> some View {
-        VStack(spacing: 0) {
-            topSessionBar
-
+        ZStack(alignment: .bottom) {
             if isTabletopConsoleEnabled, !settings.viewOnly {
-                // Tabletop split console: upper remote display + lower virtual trackpad and keyboard.
                 VStack(spacing: 0) {
                     FramebufferView(
                         framebuffer: framebuffer,
@@ -159,10 +268,9 @@ public struct InSessionView: View {
                         onSendShortcut: handleShortcut,
                         isInputDisabled: settings.viewOnly
                     )
-                    .frame(height: geometry.size.height * 0.5 - 50)
+                    .frame(height: geometry.size.height * 0.5)
                 }
             } else {
-                // Full canvas mode: maximized remote desktop (ideal for Bluetooth keyboard/mouse or pencil).
                 FramebufferView(
                     framebuffer: framebuffer,
                     displayPreference: displayPreference,
@@ -170,17 +278,18 @@ public struct InSessionView: View {
                     onPointerEvent: handlePointerEvent,
                     isInputDisabled: settings.viewOnly
                 )
-                if settings.viewOnly {
-                    // View-only banner replaces input bar.
-                    viewOnlyBanner
-                }
+                .ignoresSafeArea()
+
+                unifiedSessionDock
+                    .padding(.bottom, 16)
+                    .padding(.horizontal, 16)
             }
         }
     }
 
-    /// Mode 3: iPhone Duo Outer Screen — trailing vertical control rail per Apple HIG.
+    /// Mode 3: iPhone Duo Outer Screen — edge-to-edge canvas with thumb-accessible trailing rail.
     private func mode3Layout(geometry _: GeometryProxy) -> some View {
-        HStack(spacing: 0) {
+        ZStack(alignment: .trailing) {
             FramebufferView(
                 framebuffer: framebuffer,
                 displayPreference: displayPreference,
@@ -188,92 +297,156 @@ public struct InSessionView: View {
                 onPointerEvent: handlePointerEvent,
                 isInputDisabled: settings.viewOnly
             )
+            .ignoresSafeArea()
 
-            // Trailing edge vertical rail placed within thumb reach and respecting safe areas.
             OuterScreenRailView(
                 activeModifiers: $activeModifiers,
+                isKeyboardActive: $isKeyboardActive,
+                pointerMode: pointerMode,
+                onTogglePointerMode: {
+                    pointerMode = (pointerMode == .directTouch) ? .virtualTrackpad : .directTouch
+                },
                 onKeyPress: handleKeyPress,
                 onSendShortcut: handleShortcut,
                 onToggleDisplayPreference: toggleDisplayPreference,
                 onDisconnect: onDismiss,
                 isInputDisabled: settings.viewOnly
             )
-            .padding(.trailing, 6)
+            .padding(.trailing, 8)
         }
     }
 
-    /// View-only indicator shown when input is disabled.
-    private var viewOnlyBanner: some View {
-        Label("View Only — Input Disabled", systemImage: "eye.fill")
-            .font(.caption.bold())
-            .foregroundStyle(.secondary)
-            .padding(.vertical, 10)
-    }
-
-    private var topSessionBar: some View {
-        HStack {
-            Button(role: .destructive) {
-                onDismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.white.opacity(0.8))
-            }
-
-            Text(profile.name)
-                .font(.headline)
-                .foregroundStyle(.white)
-                .lineLimit(1)
-
-            Spacer()
-
-            if connectionState == .connecting || connectionState == .authenticating {
-                // Live session state drives progress; no state loss on rotation.
-                ProgressView()
-                    .tint(.white)
-            }
-
-            if settings.viewOnly {
-                // Fail-closed indicator when input is disabled.
-                Label("View Only", systemImage: "eye.fill")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-            }
-
-            // Mode 2 Tabletop Console Toggle
-            if horizontalSizeClass == .regular, verticalSizeClass == .regular, !settings.viewOnly {
+    /// Unified floating control dock consolidating disconnect, keyboard, pointer, display mode, and keys.
+    @ViewBuilder
+    private var unifiedSessionDock: some View {
+        if isToolbarCollapsed {
+            HStack {
+                Spacer()
                 Button {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        isTabletopConsoleEnabled.toggle()
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        isToolbarCollapsed = false
                     }
                 } label: {
-                    Label(
-                        isTabletopConsoleEnabled ? "Full Canvas" : "Tabletop Console",
-                        systemImage: isTabletopConsoleEnabled ? "arrow.up.left.and.arrow.down.right" : "laptopcomputer"
-                    )
-                    .font(.caption.bold())
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.2))
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                        .shadow(radius: 6)
                 }
             }
+        } else {
+            HStack(spacing: 8) {
+                // Collapse toggle button
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        isToolbarCollapsed = true
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 36)
+                }
 
-            // Pointer Mode Switcher
-            Button {
-                pointerMode = (pointerMode == .directTouch) ? .virtualTrackpad : .directTouch
-            } label: {
-                Image(systemName: pointerMode == .directTouch ? "hand.point.up.fill" : "cursorarrow.rays")
-                    .font(.body)
-                    .foregroundStyle(.white)
+                // Disconnect action
+                Button(role: .destructive) {
+                    onDismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.red)
+                        .frame(width: 36, height: 36)
+                }
+
+                Divider().frame(height: 22)
+
+                // Software Keyboard Toggle
+                Button {
+                    isKeyboardActive.toggle()
+                } label: {
+                    Image(systemName: isKeyboardActive ? "keyboard.fill" : "keyboard")
+                        .font(.system(size: 16))
+                        .frame(width: 36, height: 36)
+                        .background(isKeyboardActive ? Color.accentColor : Color.secondary.opacity(0.15))
+                        .foregroundStyle(isKeyboardActive ? .white : .primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .disabled(settings.viewOnly)
+                .opacity(settings.viewOnly ? 0.4 : 1.0)
+
+                // Mouse Mode Toggle
+                Button {
+                    pointerMode = (pointerMode == .directTouch) ? .virtualTrackpad : .directTouch
+                } label: {
+                    Image(systemName: pointerMode == .directTouch ? "hand.point.up.fill" : "cursorarrow.rays")
+                        .font(.system(size: 16))
+                        .frame(width: 36, height: 36)
+                        .background(Color.secondary.opacity(0.15))
+                        .foregroundStyle(.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .disabled(settings.viewOnly)
+                .opacity(settings.viewOnly ? 0.4 : 1.0)
+
+                // Display Mode Toggle
+                Button {
+                    toggleDisplayPreference()
+                } label: {
+                    Image(systemName: "aspectratio")
+                        .font(.system(size: 16))
+                        .frame(width: 36, height: 36)
+                        .background(Color.secondary.opacity(0.15))
+                        .foregroundStyle(.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                Divider().frame(height: 22)
+
+                // Modifiers
+                ForEach([MacKey.command, .option, .control, .shift]) { key in
+                    Button {
+                        toggleStickyMacModifier(key, activeModifiers: &activeModifiers, onKeyPress: handleKeyPress)
+                    } label: {
+                        Text(key.symbol)
+                            .font(.system(.body, design: .rounded).bold())
+                            .frame(minWidth: 34, minHeight: 36)
+                            .background(activeModifiers.contains(key) ? Color.accentColor : Color.secondary.opacity(0.2))
+                            .foregroundStyle(activeModifiers.contains(key) ? .white : .primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .disabled(settings.viewOnly)
+                    .opacity(settings.viewOnly ? 0.4 : 1.0)
+                }
+
+                Divider().frame(height: 22)
+
+                // Mac Actions Menu
+                Menu {
+                    Button("⌘ + Tab (App Switcher)") { handleShortcut("cmd_tab") }
+                    Button("⌘ + Space (Spotlight)") { handleShortcut("spotlight") }
+                    Button("⌃ + ↑ (Mission Control)") { handleShortcut("mission_control") }
+                    Button("⌘ + W (Close Window)") { handleShortcut("close_window") }
+                    Button("⌘ + Q (Quit App)") { handleShortcut("quit_app") }
+                    Button("⌃ + ⌘ + Q (Lock Mac)") { handleShortcut("lock_mac") }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 18))
+                        .frame(width: 36, height: 36)
+                        .background(Color.secondary.opacity(0.15))
+                        .foregroundStyle(.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .disabled(settings.viewOnly)
+                .opacity(settings.viewOnly ? 0.4 : 1.0)
             }
-            .disabled(settings.viewOnly)
-            .opacity(settings.viewOnly ? 0.4 : 1.0)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(radius: 6)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Color.black.opacity(0.85))
     }
 
     private func toggleDisplayPreference() {
@@ -285,16 +458,22 @@ public struct InSessionView: View {
     }
 
     private func startSession() async {
-        // Wire actor delegate to MainActor framebuffer; retains bridge for session lifetime.
         if sessionBridge == nil {
             let stateBinding = $connectionState
             let errorBinding = $errorMessage
-            sessionBridge = SessionClientBridge(framebuffer: framebuffer) { newState in
-                stateBinding.wrappedValue = newState
-                if case let .failed(message) = newState {
-                    errorBinding.wrappedValue = message
+            let cutTextBinding = $pendingServerCutText
+            sessionBridge = SessionClientBridge(
+                framebuffer: framebuffer,
+                onStateChange: { newState in
+                    stateBinding.wrappedValue = newState
+                    if case let .failed(message) = newState {
+                        errorBinding.wrappedValue = message
+                    }
+                },
+                onCutText: { text in
+                    cutTextBinding.wrappedValue = text
                 }
-            }
+            )
         }
         if let bridge = sessionBridge {
             await client.setDelegate(bridge)
@@ -310,13 +489,11 @@ public struct InSessionView: View {
     }
 
     private func handlePointerEvent(posX: Int, posY: Int, buttonMask: UInt8) {
-        // Fail closed when view-only is enabled.
         guard !settings.viewOnly else { return }
         Task { await client.sendPointerEvent(posX: posX, posY: posY, buttonMask: buttonMask) }
     }
 
     private func handlePointerDelta(deltaX: CGFloat, deltaY: CGFloat, buttonMask: UInt8) {
-        // Fail closed when view-only is enabled.
         guard !settings.viewOnly else { return }
         let newX = max(0, min(Int(CGFloat(framebuffer.width) / 2.0 + deltaX), framebuffer.width - 1))
         let newY = max(0, min(Int(CGFloat(framebuffer.height) / 2.0 + deltaY), framebuffer.height - 1))
@@ -327,7 +504,6 @@ public struct InSessionView: View {
         do {
             try await Task.sleep(nanoseconds: 50_000_000)
         } catch is CancellationError {
-            // Task was cancelled; honor cooperative cancellation
         } catch {
             Logger(subsystem: "com.volcrypt.ScreenVNC", category: "InSessionView")
                 .debug("waitBriefly interrupted: \(error.localizedDescription)")
@@ -335,7 +511,6 @@ public struct InSessionView: View {
     }
 
     private func handlePointerClick(buttonMask: UInt8) {
-        // Fail closed when view-only is enabled.
         guard !settings.viewOnly else { return }
         let midX = framebuffer.width / 2
         let midY = framebuffer.height / 2
@@ -347,13 +522,43 @@ public struct InSessionView: View {
     }
 
     private func handleKeyPress(key: UInt32, down: Bool) {
-        // Fail closed when view-only is enabled.
         guard !settings.viewOnly else { return }
         Task { await client.sendKeyEvent(key: key, down: down) }
     }
 
+    private func handleTypedCharacter(_ char: Character) {
+        guard !settings.viewOnly else { return }
+        let key: UInt32
+        if char == "\n" || char == "\r" {
+            key = MacKey.return.rawValue
+        } else if char == "\t" {
+            key = MacKey.tab.rawValue
+        } else if let scalar = char.unicodeScalars.first {
+            key = UInt32(scalar.value)
+        } else {
+            return
+        }
+        Task {
+            await client.sendKeyEvent(key: key, down: true)
+            do {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            } catch {}
+            await client.sendKeyEvent(key: key, down: false)
+        }
+    }
+
+    private func handleBackspace() {
+        guard !settings.viewOnly else { return }
+        Task {
+            await client.sendKeyEvent(key: MacKey.backspace.rawValue, down: true)
+            do {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            } catch {}
+            await client.sendKeyEvent(key: MacKey.backspace.rawValue, down: false)
+        }
+    }
+
     private func handleShortcut(_ name: String) {
-        // Fail closed when view-only is enabled.
         guard !settings.viewOnly else { return }
         Task {
             switch name {
@@ -365,14 +570,14 @@ public struct InSessionView: View {
                 await client.sendKeyEvent(key: MacKey.command.rawValue, down: false)
             case "spotlight":
                 await client.sendKeyEvent(key: MacKey.command.rawValue, down: true)
-                await client.sendKeyEvent(key: 0x0020, down: true) // Space
+                await client.sendKeyEvent(key: 0x0020, down: true)
                 await waitBriefly()
                 await client.sendKeyEvent(key: 0x0020, down: false)
                 await client.sendKeyEvent(key: MacKey.command.rawValue, down: false)
             case "lock_mac":
                 await client.sendKeyEvent(key: MacKey.control.rawValue, down: true)
                 await client.sendKeyEvent(key: MacKey.command.rawValue, down: true)
-                await client.sendKeyEvent(key: 0x0071, down: true) // 'q'
+                await client.sendKeyEvent(key: 0x0071, down: true)
                 await waitBriefly()
                 await client.sendKeyEvent(key: 0x0071, down: false)
                 await client.sendKeyEvent(key: MacKey.command.rawValue, down: false)
@@ -385,13 +590,13 @@ public struct InSessionView: View {
                 await client.sendKeyEvent(key: MacKey.control.rawValue, down: false)
             case "close_window":
                 await client.sendKeyEvent(key: MacKey.command.rawValue, down: true)
-                await client.sendKeyEvent(key: 0x0077, down: true) // 'w'
+                await client.sendKeyEvent(key: 0x0077, down: true)
                 await waitBriefly()
                 await client.sendKeyEvent(key: 0x0077, down: false)
                 await client.sendKeyEvent(key: MacKey.command.rawValue, down: false)
             case "quit_app":
                 await client.sendKeyEvent(key: MacKey.command.rawValue, down: true)
-                await client.sendKeyEvent(key: 0x0071, down: true) // 'q'
+                await client.sendKeyEvent(key: 0x0071, down: true)
                 await waitBriefly()
                 await client.sendKeyEvent(key: 0x0071, down: false)
                 await client.sendKeyEvent(key: MacKey.command.rawValue, down: false)
