@@ -14,10 +14,10 @@ public enum PointerMode: String, CaseIterable, Sendable {
 }
 
 public struct FramebufferView: View {
-    @ObservedObject public var framebuffer: Framebuffer
+    public var framebuffer: Framebuffer
     public var displayPreference: DisplayPreference
     public var pointerMode: PointerMode
-    public var onPointerEvent: (Int, Int, UInt8) -> Void
+    public var onPointerEvent: @MainActor (Int, Int, UInt8) -> Void
     public var isInputDisabled: Bool = false
 
     @State private var zoomScale: CGFloat = 1.0
@@ -30,7 +30,7 @@ public struct FramebufferView: View {
         framebuffer: Framebuffer,
         displayPreference: DisplayPreference = .fit,
         pointerMode: PointerMode = .directTouch,
-        onPointerEvent: @escaping (Int, Int, UInt8) -> Void,
+        onPointerEvent: @escaping @MainActor (Int, Int, UInt8) -> Void,
         isInputDisabled: Bool = false
     ) {
         self.framebuffer = framebuffer

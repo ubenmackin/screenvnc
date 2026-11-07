@@ -1,16 +1,19 @@
 // Connection — Persistence and iCloud synchronization for connection profiles.
-import Combine
 import Foundation
+import Observation
+import os
 
+@Observable
 @MainActor
-public final class ProfileStore: ObservableObject {
+public final class ProfileStore {
     public static let shared = ProfileStore()
 
-    @Published public private(set) var profiles: [ConnectionProfile] = []
+    public private(set) var profiles: [ConnectionProfile] = []
 
     private let fileURL: URL
     private let kvsKey = "com.volcrypt.ScreenVNC.profiles"
-    private var cancellables = Set<AnyCancellable>()
+    private let logger = Logger(subsystem: "com.volcrypt.ScreenVNC", category: "ProfileStore")
+    private var syncTask: Task<Void, Never>?
 
     public init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -19,12 +22,17 @@ public final class ProfileStore: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         } catch {
-            // Non-fatal fallback for directory creation
+            logger.error("Failed to create profile directory: \(error.localizedDescription)")
         }
         fileURL = folder.appendingPathComponent("profiles.json")
 
         load()
         setupCloudSync()
+    }
+
+    /// Isolated deinit runs on MainActor so the MainActor-isolated sync task is safe to cancel.
+    isolated deinit {
+        syncTask?.cancel()
     }
 
     public func save(_ profile: ConnectionProfile) {
@@ -62,7 +70,7 @@ public final class ProfileStore: ObservableObject {
             NSUbiquitousKeyValueStore.default.set(data, forKey: kvsKey)
             NSUbiquitousKeyValueStore.default.synchronize()
         } catch {
-            // Non-fatal persistence error.
+            logger.error("Failed to persist profiles: \(error.localizedDescription)")
         }
     }
 
@@ -79,7 +87,7 @@ public final class ProfileStore: ObservableObject {
             }
             return
         } catch {
-            // Local file not present or unreadable; check cloud
+            logger.debug("Local profiles unreadable or not present, checking cloud: \(error.localizedDescription)")
         }
 
         if let cloudData = NSUbiquitousKeyValueStore.default.data(forKey: kvsKey) {
@@ -95,33 +103,36 @@ public final class ProfileStore: ObservableObject {
                     try clean.write(to: fileURL, options: .atomic)
                 }
             } catch {
-                // Corrupt payload keeps last-good list.
+                logger.warning("Failed to decode iCloud KVS profiles payload: \(error.localizedDescription)")
             }
         }
     }
 
     private func setupCloudSync() {
-        NotificationCenter.default.publisher(for: NSUbiquitousKeyValueStore.didChangeExternallyNotification)
-            .sink { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    guard let self, let cloudData = NSUbiquitousKeyValueStore.default.data(forKey: self.kvsKey) else { return }
-                    do {
-                        let decoded = try JSONDecoder().decode([ConnectionProfile].self, from: cloudData)
-                        let valid = self.validated(decoded)
-                        self.profiles = valid
-                        if valid.count == decoded.count {
-                            try cloudData.write(to: self.fileURL, options: .atomic)
-                        } else {
-                            // Persist clean subset only; poisoned bytes never reach disk.
-                            let clean = try JSONEncoder().encode(valid)
-                            try clean.write(to: self.fileURL, options: .atomic)
-                        }
-                    } catch {
-                        // Corrupt payload keeps last-good list.
-                    }
-                }
+        syncTask = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: NSUbiquitousKeyValueStore.didChangeExternallyNotification) {
+                guard let self else { break }
+                self.handleCloudUpdate()
             }
-            .store(in: &cancellables)
+        }
+    }
+
+    private func handleCloudUpdate() {
+        guard let cloudData = NSUbiquitousKeyValueStore.default.data(forKey: kvsKey) else { return }
+        do {
+            let decoded = try JSONDecoder().decode([ConnectionProfile].self, from: cloudData)
+            let valid = validated(decoded)
+            profiles = valid
+            if valid.count == decoded.count {
+                try cloudData.write(to: fileURL, options: .atomic)
+            } else {
+                // Persist clean subset only; poisoned bytes never reach disk.
+                let clean = try JSONEncoder().encode(valid)
+                try clean.write(to: fileURL, options: .atomic)
+            }
+        } catch {
+            logger.warning("Failed to decode external iCloud profiles update: \(error.localizedDescription)")
+        }
     }
 
     /// Single-validator recheck drops poisoned entries before they enter memory.

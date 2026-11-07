@@ -3,10 +3,10 @@ import SwiftUI
 
 public struct TabletopConsoleView: View {
     @Binding public var activeModifiers: Set<MacKey>
-    public var onPointerDelta: (CGFloat, CGFloat, UInt8) -> Void
-    public var onPointerClick: (UInt8) -> Void
-    public var onKeyPress: (UInt32, Bool) -> Void
-    public var onSendShortcut: (String) -> Void
+    public var onPointerDelta: @MainActor (CGFloat, CGFloat, UInt8) -> Void
+    public var onPointerClick: @MainActor (UInt8) -> Void
+    public var onKeyPress: @MainActor (UInt32, Bool) -> Void
+    public var onSendShortcut: @MainActor (String) -> Void
     public var isInputDisabled: Bool = false
 
     @State private var trackpadDragStart: CGPoint = .zero
@@ -15,10 +15,10 @@ public struct TabletopConsoleView: View {
 
     public init(
         activeModifiers: Binding<Set<MacKey>>,
-        onPointerDelta: @escaping (CGFloat, CGFloat, UInt8) -> Void,
-        onPointerClick: @escaping (UInt8) -> Void,
-        onKeyPress: @escaping (UInt32, Bool) -> Void,
-        onSendShortcut: @escaping (String) -> Void,
+        onPointerDelta: @escaping @MainActor (CGFloat, CGFloat, UInt8) -> Void,
+        onPointerClick: @escaping @MainActor (UInt8) -> Void,
+        onKeyPress: @escaping @MainActor (UInt32, Bool) -> Void,
+        onSendShortcut: @escaping @MainActor (String) -> Void,
         isInputDisabled: Bool = false
     ) {
         _activeModifiers = activeModifiers

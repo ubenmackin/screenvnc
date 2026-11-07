@@ -50,7 +50,7 @@ extension VNCClient {
     }
 
     private func performSecurityNegotiation(preferred: AuthMethod, host: String) async throws -> RFBConstants.SecurityType {
-        updateState(.authenticating)
+        await updateState(.authenticating)
         let numTypesData = try await readExact(1)
         guard let firstByte = numTypesData.first else {
             throw VNCAuthError.authenticationRejected("Empty security negotiation packet.")

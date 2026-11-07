@@ -2,19 +2,19 @@
 import SwiftUI
 
 public struct CoverScreenView: View {
-    @ObservedObject private var profileStore = ProfileStore.shared
-    @ObservedObject private var discoveryService = BonjourDiscoveryService.shared
+    private var profileStore = ProfileStore.shared
+    private var discoveryService = BonjourDiscoveryService.shared
 
-    public var onPresentSettings: () -> Void
-    public var onPresentNewProfile: () -> Void
-    public var onStartConnection: (ConnectionProfile) -> Void
-    public var onConnectDiscovered: (DiscoveredHost) -> Void
+    public var onPresentSettings: @MainActor () -> Void
+    public var onPresentNewProfile: @MainActor () -> Void
+    public var onStartConnection: @MainActor (ConnectionProfile) -> Void
+    public var onConnectDiscovered: @MainActor (DiscoveredHost) -> Void
 
     public init(
-        onPresentSettings: @escaping () -> Void,
-        onPresentNewProfile: @escaping () -> Void,
-        onStartConnection: @escaping (ConnectionProfile) -> Void,
-        onConnectDiscovered: @escaping (DiscoveredHost) -> Void
+        onPresentSettings: @escaping @MainActor () -> Void,
+        onPresentNewProfile: @escaping @MainActor () -> Void,
+        onStartConnection: @escaping @MainActor (ConnectionProfile) -> Void,
+        onConnectDiscovered: @escaping @MainActor (DiscoveredHost) -> Void
     ) {
         self.onPresentSettings = onPresentSettings
         self.onPresentNewProfile = onPresentNewProfile

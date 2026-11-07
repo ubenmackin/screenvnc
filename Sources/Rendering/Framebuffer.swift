@@ -1,15 +1,16 @@
 // Rendering — Framebuffer double-buffering, invalidation coalescing, and image generation.
-import Combine
 import CoreGraphics
 import Foundation
+import Observation
 
+@Observable
 @MainActor
-public final class Framebuffer: ObservableObject {
-    @Published public private(set) var width: Int
-    @Published public private(set) var height: Int
-    @Published public private(set) var image: CGImage?
-    @Published public var cursorPosition: CGPoint = .zero
-    @Published public var isCursorVisible: Bool = false
+public final class Framebuffer {
+    public private(set) var width: Int
+    public private(set) var height: Int
+    public private(set) var image: CGImage?
+    public var cursorPosition: CGPoint = .zero
+    public var isCursorVisible: Bool = false
 
     private var pixelBuffer: Data
     private let bytesPerPixel = 4

@@ -1,13 +1,14 @@
 // Rendering — Primary active remote desktop session viewer and mode adapter.
+import os
 import SwiftUI
 
 /// Session delegate bridges actor callbacks onto MainActor framebuffer.
 @MainActor
 private final class SessionClientBridge: VNCClientDelegate {
     private let framebuffer: Framebuffer
-    private let onStateChange: (VNCConnectionState) -> Void
+    private let onStateChange: @MainActor (VNCConnectionState) -> Void
 
-    init(framebuffer: Framebuffer, onStateChange: @escaping (VNCConnectionState) -> Void) {
+    init(framebuffer: Framebuffer, onStateChange: @escaping @MainActor (VNCConnectionState) -> Void) {
         self.framebuffer = framebuffer
         self.onStateChange = onStateChange
     }
@@ -35,12 +36,12 @@ private final class SessionClientBridge: VNCClientDelegate {
 
 public struct InSessionView: View {
     public let profile: ConnectionProfile
-    public var onDismiss: () -> Void
+    public var onDismiss: @MainActor () -> Void
 
-    @StateObject private var framebuffer = Framebuffer()
+    @State private var framebuffer = Framebuffer()
     private let client = VNCClient()
     @State private var sessionBridge: SessionClientBridge?
-    @ObservedObject private var settings = SettingsStore.shared
+    private var settings = SettingsStore.shared
     @State private var activeModifiers: Set<MacKey> = []
     @State private var displayPreference: DisplayPreference
     @State private var pointerMode: PointerMode = .directTouch
@@ -51,7 +52,7 @@ public struct InSessionView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
-    public init(profile: ConnectionProfile, onDismiss: @escaping () -> Void) {
+    public init(profile: ConnectionProfile, onDismiss: @escaping @MainActor () -> Void) {
         self.profile = profile
         self.onDismiss = onDismiss
         _displayPreference = State(initialValue: profile.displayPreference)
@@ -316,8 +317,11 @@ public struct InSessionView: View {
     private func waitBriefly() async {
         do {
             try await Task.sleep(nanoseconds: 50_000_000)
+        } catch is CancellationError {
+            // Task was cancelled; honor cooperative cancellation
         } catch {
-            // Non-fatal task sleep interruption
+            Logger(subsystem: "com.volcrypt.ScreenVNC", category: "InSessionView")
+                .debug("waitBriefly interrupted: \(error.localizedDescription)")
         }
     }
 

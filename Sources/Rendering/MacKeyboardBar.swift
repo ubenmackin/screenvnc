@@ -1,4 +1,5 @@
 // Rendering — Mac-specific modifier keys, function keys, and shortcut trigger bar.
+import os
 import SwiftUI
 
 public enum MacKey: UInt32, CaseIterable, Identifiable {
@@ -45,10 +46,11 @@ public enum MacKey: UInt32, CaseIterable, Identifiable {
 }
 
 /// Shared sticky-modifier toggle; single owner for modifier state changes.
+@MainActor
 public func toggleStickyMacModifier(
     _ key: MacKey,
     activeModifiers: inout Set<MacKey>,
-    onKeyPress: (UInt32, Bool) -> Void
+    onKeyPress: @MainActor (UInt32, Bool) -> Void
 ) {
     if activeModifiers.contains(key) {
         activeModifiers.remove(key)
@@ -61,16 +63,16 @@ public func toggleStickyMacModifier(
 
 public struct MacKeyboardBar: View {
     @Binding public var activeModifiers: Set<MacKey>
-    public var onKeyPress: (UInt32, Bool) -> Void
-    public var onSendShortcut: (String) -> Void
+    public var onKeyPress: @MainActor (UInt32, Bool) -> Void
+    public var onSendShortcut: @MainActor (String) -> Void
     public var isInputDisabled: Bool = false
 
     @State private var showingShortcutsMenu = false
 
     public init(
         activeModifiers: Binding<Set<MacKey>>,
-        onKeyPress: @escaping (UInt32, Bool) -> Void,
-        onSendShortcut: @escaping (String) -> Void,
+        onKeyPress: @escaping @MainActor (UInt32, Bool) -> Void,
+        onSendShortcut: @escaping @MainActor (String) -> Void,
         isInputDisabled: Bool = false
     ) {
         _activeModifiers = activeModifiers
@@ -157,12 +159,14 @@ public struct MacKeyboardBar: View {
 
     private func triggerKeyTap(_ key: MacKey) {
         onKeyPress(key.rawValue, true)
-        // MainActor hop avoids capturing non-Sendable closure in Sendable dispatch.
-        Task { @MainActor in
+        Task {
             do {
                 try await Task.sleep(nanoseconds: 50_000_000)
+            } catch is CancellationError {
+                // Ensure key-up below keeps pair balanced on cancellation
             } catch {
-                // Cancellation ignored; key-up below keeps pair balanced.
+                Logger(subsystem: "com.volcrypt.ScreenVNC", category: "MacKeyboardBar")
+                    .debug("Key tap sleep interrupted: \(error.localizedDescription)")
             }
             onKeyPress(key.rawValue, false)
         }

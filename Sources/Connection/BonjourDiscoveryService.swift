@@ -1,7 +1,7 @@
 // Connection — Bonjour mDNS service discovery for local Mac hosts.
-import Combine
 import Foundation
 import Network
+import Observation
 
 public struct DiscoveredHost: Identifiable, Sendable, Hashable {
     public var id: String {
@@ -19,12 +19,13 @@ public struct DiscoveredHost: Identifiable, Sendable, Hashable {
     }
 }
 
+@Observable
 @MainActor
-public final class BonjourDiscoveryService: ObservableObject {
+public final class BonjourDiscoveryService {
     public static let shared = BonjourDiscoveryService()
 
-    @Published public private(set) var discoveredHosts: [DiscoveredHost] = []
-    @Published public private(set) var isScanning: Bool = false
+    public private(set) var discoveredHosts: [DiscoveredHost] = []
+    public private(set) var isScanning: Bool = false
 
     private var browsers: [NWBrowser] = []
     private var resultsByService: [String: Set<NWBrowser.Result>] = [:]
@@ -45,25 +46,32 @@ public final class BonjourDiscoveryService: ObservableObject {
 
         let newBrowser = NWBrowser(for: descriptor, using: parameters)
         newBrowser.browseResultsChangedHandler = { [weak self] results, _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.resultsByService[serviceType] = results
-                let merged = self.resultsByService.values.reduce(into: Set<NWBrowser.Result>()) { $0.formUnion($1) }
-                self.handleResults(merged)
+            Task { [weak self] in
+                await self?.updateDiscoveredResults(results, for: serviceType)
             }
         }
         newBrowser.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor [weak self] in
-                switch state {
-                case .ready: self?.isScanning = true
-                case .failed, .cancelled: self?.isScanning = false
-                default: break
-                }
+            Task { [weak self] in
+                await self?.updateScanState(state)
             }
         }
 
         newBrowser.start(queue: .main)
         browsers.append(newBrowser)
+    }
+
+    private func updateDiscoveredResults(_ results: Set<NWBrowser.Result>, for serviceType: String) {
+        resultsByService[serviceType] = results
+        let merged = resultsByService.values.reduce(into: Set<NWBrowser.Result>()) { $0.formUnion($1) }
+        handleResults(merged)
+    }
+
+    private func updateScanState(_ state: NWBrowser.State) {
+        switch state {
+        case .ready: isScanning = true
+        case .failed, .cancelled: isScanning = false
+        default: break
+        }
     }
 
     public func stopDiscovery() {

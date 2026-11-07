@@ -1,6 +1,6 @@
 // Settings — Application-wide preferences and defaults store.
-import Combine
 import Foundation
+import Observation
 
 public enum TabletopConsoleMode: String, Codable, Sendable, CaseIterable {
     case auto
@@ -16,31 +16,32 @@ public enum TabletopConsoleMode: String, Codable, Sendable, CaseIterable {
     }
 }
 
+@Observable
 @MainActor
-public final class SettingsStore: ObservableObject {
+public final class SettingsStore {
     public static let shared = SettingsStore()
 
-    @Published public var defaultDisplayPreference: DisplayPreference {
+    public var defaultDisplayPreference: DisplayPreference {
         didSet { UserDefaults.standard.set(defaultDisplayPreference.rawValue, forKey: "defaultDisplayPreference") }
     }
 
-    @Published public var defaultQualityPreference: QualityPreference {
+    public var defaultQualityPreference: QualityPreference {
         didSet { UserDefaults.standard.set(defaultQualityPreference.rawValue, forKey: "defaultQualityPreference") }
     }
 
-    @Published public var tabletopConsoleMode: TabletopConsoleMode {
+    public var tabletopConsoleMode: TabletopConsoleMode {
         didSet { UserDefaults.standard.set(tabletopConsoleMode.rawValue, forKey: "tabletopConsoleMode") }
     }
 
-    @Published public var requireBiometricsGlobally: Bool {
+    public var requireBiometricsGlobally: Bool {
         didSet { UserDefaults.standard.set(requireBiometricsGlobally, forKey: "requireBiometricsGlobally") }
     }
 
-    @Published public var autoDiscoverBonjour: Bool {
+    public var autoDiscoverBonjour: Bool {
         didSet { UserDefaults.standard.set(autoDiscoverBonjour, forKey: "autoDiscoverBonjour") }
     }
 
-    @Published public var viewOnly: Bool {
+    public var viewOnly: Bool {
         didSet { UserDefaults.standard.set(viewOnly, forKey: "viewOnly") }
     }
 

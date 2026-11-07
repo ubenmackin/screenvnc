@@ -47,12 +47,12 @@ public actor VNCClient {
     /// Connects to a remote host and executes the RFB protocol handshake.
     public func connect(profile: ConnectionProfile, password: String?) async throws {
         try profile.validate()
-        updateState(.connecting)
+        await updateState(.connecting)
 
         let host = NWEndpoint.Host(profile.host)
         guard let port = NWEndpoint.Port(rawValue: UInt16(profile.port)) else {
             let errorMsg = "Invalid port \(profile.port)"
-            updateState(.failed(errorMsg))
+            await updateState(.failed(errorMsg))
             throw ProfileValidationError.invalidPort(profile.port)
         }
 
@@ -60,39 +60,43 @@ public actor VNCClient {
         let conn = NWConnection(host: host, port: port, using: tcpParams)
         connection = conn
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            conn.stateUpdateHandler = { newState in
-                switch newState {
-                case .ready:
-                    conn.stateUpdateHandler = nil
-                    continuation.resume()
-                case let .failed(error):
-                    conn.stateUpdateHandler = nil
-                    continuation.resume(throwing: error)
-                case .cancelled:
-                    conn.stateUpdateHandler = nil
-                    continuation.resume(throwing: CancellationError())
-                default:
-                    break
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                conn.stateUpdateHandler = { newState in
+                    switch newState {
+                    case .ready:
+                        conn.stateUpdateHandler = nil
+                        continuation.resume()
+                    case let .failed(error):
+                        conn.stateUpdateHandler = nil
+                        continuation.resume(throwing: error)
+                    case .cancelled:
+                        conn.stateUpdateHandler = nil
+                        continuation.resume(throwing: CancellationError())
+                    default:
+                        break
+                    }
                 }
+                conn.start(queue: .global())
             }
-            conn.start(queue: .global())
+        } onCancel: {
+            conn.cancel()
         }
 
         try await executeHandshake(profile: profile, password: password)
         isRunning = true
-        updateState(.connected)
+        await updateState(.connected)
 
         Task {
             await self.startReceiveLoop()
         }
     }
 
-    public func disconnect() {
+    public func disconnect() async {
         isRunning = false
         connection?.cancel()
         connection = nil
-        updateState(.disconnected)
+        await updateState(.disconnected)
     }
 
     /// Sends mouse pointer coordinates and button state (RFC 6143 Section 7.5.5).
@@ -195,7 +199,7 @@ public actor VNCClient {
                 }
             } catch {
                 if isRunning {
-                    updateState(.failed(error.localizedDescription))
+                    await updateState(.failed(error.localizedDescription))
                 }
                 break
             }
@@ -299,41 +303,48 @@ public actor VNCClient {
 
     func readExact(_ count: Int) async throws -> Data {
         guard let connection else { throw CancellationError() }
-        return try await withCheckedThrowingContinuation { continuation in
-            connection.receive(minimumIncompleteLength: count, maximumLength: count) { data, _, isComplete, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let data, data.count == count {
-                    continuation.resume(returning: data)
-                } else if isComplete {
-                    continuation.resume(throwing: CancellationError())
-                } else {
-                    // Guarantee resume on short reads; hanging tasks leak continuations.
-                    continuation.resume(throwing: CancellationError())
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                connection.receive(minimumIncompleteLength: count, maximumLength: count) { data, _, isComplete, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let data, data.count == count {
+                        continuation.resume(returning: data)
+                    } else if isComplete {
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        // Guarantee resume on short reads; hanging tasks leak continuations.
+                        continuation.resume(throwing: CancellationError())
+                    }
                 }
             }
+        } onCancel: {
+            connection.cancel()
         }
     }
 
     func sendExact(_ data: Data) async throws {
         guard let connection else { throw CancellationError() }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            connection.send(content: data, completion: .contentProcessed { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            })
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                connection.send(content: data, completion: .contentProcessed { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                })
+            }
+        } onCancel: {
+            connection.cancel()
         }
     }
 
-    func updateState(_ newState: VNCConnectionState) {
+    func updateState(_ newState: VNCConnectionState) async {
         state = newState
-        // Hop state to MainActor; actor state stays isolated.
         let capturedDelegate = delegate
         let capturedSelf = self
-        Task { @MainActor in
+        await MainActor.run {
             capturedDelegate?.vncClient(capturedSelf, didUpdateState: newState)
         }
     }
