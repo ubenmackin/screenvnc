@@ -28,6 +28,7 @@ targets:
         DEVELOPMENT_TEAM: LYYD96F2J8
         IPHONEOS_DEPLOYMENT_TARGET: "27.1"
         INFOPLIST_KEY_CFBundleDisplayName: "ScreenVNC"
+        INFOPLIST_KEY_CFBundleIconName: "AppIcon"
         INFOPLIST_KEY_CKSharingSupported: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"

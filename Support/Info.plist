@@ -6,6 +6,8 @@
 	<string>com.volcrypt.ScreenVNC</string>
 	<key>CFBundleDisplayName</key>
 	<string>ScreenVNC</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleName</key>
 	<string>ScreenVNC</string>
 	<key>CFBundleShortVersionString</key>
