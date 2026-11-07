@@ -22,6 +22,15 @@
 	<true/>
 	<key>UILaunchScreen_Generation</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>ScreenVNC discovers local Macs on your Wi-Fi network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_rfb._tcp</string>
+		<string>_screensharing._tcp</string>
+	</array>
+	<key>NSFaceIDUsageDescription</key>
+	<string>ScreenVNC uses Face ID to securely authenticate saved sessions.</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

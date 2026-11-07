@@ -4,9 +4,9 @@ Pure SwiftUI VNC viewer for connecting to macOS Screen Sharing from iOS and iPad
 
 Repository: https://github.com/ubenmackin/screenvnc
 
-Owner: This document owns the subsystem layout, the RFB roadmap, and the commenting guidelines.
-The RFB roadmap below is future work. This slice ships app shell plus navigation
-plus stubs only, with zero protocol implementation.
+Owner: This document owns the subsystem layout, the RFB engine, and the commenting guidelines.
+The RFB section below covers the implemented custom engine plus roadmap extensions.
+This slice ships app shell plus navigation plus the custom VNC engine.
 
 ---
 
@@ -40,10 +40,12 @@ framebuffer, and send keyboard plus pointer input back.
   `.xcodeproj` is never edited by hand or committed; regenerate on file changes.
 - **UI lifecycle**: SwiftUI lifecycle (`App` plus `Scene` plus `View`) with zero
   UIKit bridging.
-- **RFB implementation**: rootshellVNC native Swift package as the chosen RFB
-  implementation: https://github.com/kitknox/rootshell-vnc
-- **Persistence**: SwiftData for connection profiles plus lightweight
-  `UserDefaults` keys for per-host display preferences.
+- **RFB implementation**: custom native Swift RFB engine — `VNCClient` actor over
+  `Network.framework` `NWConnection` with handshake, security, and
+  encoding handling inside `Sources/VNC`.
+- **Persistence**: JSON file in Application Support mirrored to
+  `NSUbiquitousKeyValueStore` for connection profiles plus Keychain for
+  credentials plus lightweight `UserDefaults` keys for viewer preferences.
 - **Async model**: Swift concurrency (`async`/`await`, `Actor`-isolated session
   objects, `@MainActor` view models).
 
@@ -52,6 +54,8 @@ Alternatives considered:
 - RoyalVNC: rejected as archived. It is unmaintained and is not a dependency.
 - TailVNC plus Pocket-Mac: reference-only. Consulted for UX plus interop notes,
   never vendored and never depended upon.
+- rootshellVNC (https://github.com/kitknox/rootshell-vnc): evaluated and not
+  vendored; custom `NWConnection` engine is the intentional implementation.
 
 ---
 
@@ -87,7 +91,7 @@ narrow public seam.
 Sources/
 ├── App/                  # SwiftUI App plus Scene plus root navigation plus launch state
 ├── Connection/           # Connection profiles, validation, saved hosts, connect flow
-├── VNC/                  # RFB session stubs owning future rootshellVNC integration
+├── VNC/                  # RFB session engine (custom NWConnection client)
 ├── Rendering/            # Framebuffer views, scaling, invalidation-driven redraw
 └── Settings/             # Viewer preferences, display options, diagnostics
 Tests/
@@ -101,8 +105,8 @@ Assets.xcassets/          # App icons, accent colors, image catalogs
 - **App**: owns launch, navigation, and dependency wiring. No networking here.
 - **Connection**: owns profile storage plus connection profile validation. Sole
   place that accepts or rejects a host/port/credential triple.
-- **VNC**: owns session lifecycle stubs for the future RFB roadmap. No wire
-  parsing in this slice.
+- **VNC**: owns session lifecycle plus wire protocol (handshake, security,
+  encodings, pixel format) via the custom `NWConnection` engine.
 - **Rendering**: owns framebuffer invalidation handling and scaling. Redraws only
   on invalidated rects.
 - **Settings**: owns user preferences and display defaults. No session logic.
@@ -150,11 +154,11 @@ re-implement the owning subsystem.
 
 ---
 
-## 6. RFB Roadmap — Future Work (macOS Interop)
+## 6. RFB Interop — Implemented Engine plus Roadmap (macOS Interop)
 
-This section is roadmap only. Zero protocol implementation exists in this slice.
-Stub owners from TASK-001 are noted per item. When implementation begins, all
-wire work lands inside `VNC` behind the contracts above.
+Custom `NWConnection` engine in `Sources/VNC` implements the core wire path.
+Remaining items below extend that engine. All wire work lands inside `VNC`
+behind the contracts above.
 
 - **Protocol versions**: 3.3 plus 3.7 plus 3.8. Owner: `VNC`. Negotiate highest
   mutually supported version; 3.8 preferred against macOS Screen Sharing.
@@ -171,11 +175,11 @@ wire work lands inside `VNC` behind the contracts above.
   Cursor enables remote cursor rendering; DesktopSize plus ExtendedDesktopSize
   drive canvas resize; LastRect terminates update batches.
 - **Sequencing**: version handshake, then auth selection, then init exchange,
-  then encoding negotiation, then steady-state update loop. Each step is a stub
-  seam in `VNC` today and becomes a vertical slice later.
-- **Non-goals in this slice**: no socket code, no DES routines, no DH key
-  exchange, no zlib or tight decoders. Stubs compile and link; they never speak
-  to a server.
+  then encoding negotiation, then steady-state update loop. Each step runs
+  in the `VNC` engine behind the contract seams above.
+- **Non-goals in this slice**: no UI-driven socket churn outside `VNC`, no
+  vendored crypto or RFB packages; hardening of DH exchange and decoder
+  edge cases remains roadmap. Engine speaks to servers via `VNC`.
 
 ---
 
@@ -203,8 +207,9 @@ wire work lands inside `VNC` behind the contracts above.
   with randomized ordering for determinism.
 - **No hardcoded dimensions**: layouts use traits, safe areas, and geometry
   readers. Never branch on device models or fixed point sizes.
-- **No private APIs**: RFB plus rendering plus input use public SDKs and the
-  rootshellVNC package only.
+- **No private APIs**: RFB plus rendering plus input use public SDKs only —
+  `Network`, `CryptoKit`/`CommonCrypto`, `Compression`, `LocalAuthentication`
+  — plus system SwiftUI/Combine; no private APIs and no vendored RFB package.
 - **Single-owner rules**: `Connection` alone validates profiles; `Rendering`
   alone coalesces framebuffer invalidation; `VNC` alone translates input events;
   `App` alone wires dependencies; `Settings` alone owns preferences. Call sites
