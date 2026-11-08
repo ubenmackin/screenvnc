@@ -15,6 +15,7 @@ targets:
     dependencies:
       - sdk: AppIntents.framework
       - sdk: LocalAuthentication.framework
+      - sdk: CloudKit.framework
     settings:
       base:
         SWIFT_VERSION: "6.0"
@@ -29,7 +30,6 @@ targets:
         IPHONEOS_DEPLOYMENT_TARGET: "27.1"
         INFOPLIST_KEY_CFBundleDisplayName: "ScreenVNC"
         INFOPLIST_KEY_CFBundleIconName: "AppIcon"
-        INFOPLIST_KEY_CKSharingSupported: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
@@ -47,6 +47,18 @@ targets:
         Debug:
           base:
             SWIFT_ENABLE_TESTABILITY: "YES"
+            ICLOUD_CONTAINER_ENVIRONMENT: Development
+        Release:
+          base:
+            ICLOUD_CONTAINER_ENVIRONMENT: Production
+    entitlements:
+      path: Support/ScreenVNC.entitlements
+      properties:
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.volcrypt.ScreenVNC
+        com.apple.developer.icloud-services:
+          - CloudKit
 
   ScreenVNCTests:
     type: bundle.unit-test

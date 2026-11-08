@@ -49,6 +49,10 @@ public final class SettingsStore {
         didSet { UserDefaults.standard.set(viewOnly, forKey: "viewOnly") }
     }
 
+    public var hasCompletedInitialSetup: Bool {
+        didSet { UserDefaults.standard.set(hasCompletedInitialSetup, forKey: "hasCompletedInitialSetup") }
+    }
+
     public init() {
         let displayDefault = DisplayPreference.fit.rawValue
         let displayRaw = UserDefaults.standard.string(forKey: "defaultDisplayPreference") ?? displayDefault
@@ -69,5 +73,14 @@ public final class SettingsStore {
         requireBiometricsGlobally = UserDefaults.standard.bool(forKey: "requireBiometricsGlobally")
         autoDiscoverBonjour = UserDefaults.standard.object(forKey: "autoDiscoverBonjour") as? Bool ?? true
         viewOnly = UserDefaults.standard.bool(forKey: "viewOnly")
+
+        if let explicit = UserDefaults.standard.object(forKey: "hasCompletedInitialSetup") as? Bool {
+            hasCompletedInitialSetup = explicit
+        } else {
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? FileManager.default.temporaryDirectory
+            let file = appSupport.appendingPathComponent("ScreenVNC", isDirectory: true).appendingPathComponent("profiles.json")
+            hasCompletedInitialSetup = FileManager.default.fileExists(atPath: file.path)
+        }
     }
 }
