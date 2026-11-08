@@ -18,9 +18,13 @@ framebuffer, and send keyboard plus pointer input back.
 
 1. **Mac-first interop**: macOS Screen Sharing is the reference server. Protocol
    choices, auth choices, and encoding choices are justified by what macOS speaks.
-2. **Native SwiftUI start to finish**: SwiftUI lifecycle with zero UIKit bridging.
-   No UIViewController wrappers, no hosted views. Layout flows from traits and
-   safe-area guides.
+2. **Native SwiftUI start to finish**: SwiftUI lifecycle owns every screen. The
+   one UIKit seam is charter-approved and confined to `Sources/Rendering`:
+   `CanvasGestureOverlay` (gesture recognizers) plus
+   `SoftwareKeyboardResponder`/`KeyInputView` (keyboard capture). Every event
+   that seam captures funnels through the Contract 5.3 `VNCInputPipeline`.
+   No UIViewController wrappers, no UIKit outside that seam. Layout flows from
+   traits and safe-area guides.
 3. **Thin viewer, thick platform**: RFB stays behind a narrow VNC subsystem seam.
    Rendering, input, and settings never parse wire bytes directly.
 4. **Profiles over prefs**: a connection profile (host, port, credentials,
@@ -38,8 +42,10 @@ framebuffer, and send keyboard plus pointer input back.
 - **Deployment**: iOS 27.1.
 - **Project generation**: XcodeGen from a declarative `project.yml`. The generated
   `.xcodeproj` is never edited by hand or committed; regenerate on file changes.
-- **UI lifecycle**: SwiftUI lifecycle (`App` plus `Scene` plus `View`) with zero
-  UIKit bridging.
+- **UI lifecycle**: SwiftUI lifecycle (`App` plus `Scene` plus `View`). UIKit is
+  confined to the Rendering seam (`CanvasGestureOverlay`,
+  `SoftwareKeyboardResponder`/`KeyInputView`); every captured gesture or key
+  event enters through the Contract 5.3 `VNCInputPipeline`.
 - **RFB implementation**: custom native Swift RFB engine — `VNCClient` actor over
   `Network.framework` `NWConnection` with handshake, security, and
   encoding handling inside `Sources/VNC`.

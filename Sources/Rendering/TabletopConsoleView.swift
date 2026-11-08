@@ -5,18 +5,18 @@ public struct TabletopConsoleView: View {
     @Binding public var activeModifiers: Set<MacKey>
     public var onPointerDelta: @MainActor (CGFloat, CGFloat, UInt8) -> Void
     public var onPointerClick: @MainActor (UInt8) -> Void
+    public var onPointerScroll: (@MainActor (CGSize) -> Void)?
     public var onKeyPress: @MainActor (UInt32, Bool) -> Void
     public var onSendShortcut: @MainActor (String) -> Void
     public var isInputDisabled: Bool = false
 
-    @State private var lastTrackpadTranslation: CGSize = .zero
-    @State private var isLeftMouseDown = false
-    @State private var isRightMouseDown = false
+    @State private var isTapDragging = false
 
     public init(
         activeModifiers: Binding<Set<MacKey>>,
         onPointerDelta: @escaping @MainActor (CGFloat, CGFloat, UInt8) -> Void,
         onPointerClick: @escaping @MainActor (UInt8) -> Void,
+        onPointerScroll: (@MainActor (CGSize) -> Void)? = nil,
         onKeyPress: @escaping @MainActor (UInt32, Bool) -> Void,
         onSendShortcut: @escaping @MainActor (String) -> Void,
         isInputDisabled: Bool = false
@@ -24,6 +24,7 @@ public struct TabletopConsoleView: View {
         _activeModifiers = activeModifiers
         self.onPointerDelta = onPointerDelta
         self.onPointerClick = onPointerClick
+        self.onPointerScroll = onPointerScroll
         self.onKeyPress = onKeyPress
         self.onSendShortcut = onSendShortcut
         self.isInputDisabled = isInputDisabled
@@ -78,21 +79,53 @@ public struct TabletopConsoleView: View {
                     .padding(.bottom, 10)
                 }
             }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        // View-only suppresses trackpad deltas.
-                        guard !isInputDisabled else { return }
-                        // Emit incremental deltas so host accumulates from cursor.
-                        let deltaX = value.translation.width - lastTrackpadTranslation.width
-                        let deltaY = value.translation.height - lastTrackpadTranslation.height
-                        lastTrackpadTranslation = value.translation
-                        onPointerDelta(deltaX, deltaY, 0)
-                    }
-                    .onEnded { _ in
-                        lastTrackpadTranslation = .zero
-                    }
-            )
+            .overlay {
+                CanvasGestureOverlay(
+                    configuration: CanvasGestureConfiguration(
+                        pointerMode: .virtualTrackpad,
+                        canPan: false,
+                        isInputDisabled: isInputDisabled,
+                        tapToClickInTrackpad: SettingsStore.shared.tapToClickInTrackpad,
+                        twoFingerTrackpadAction: .scrollRemote
+                    ),
+                    callbacks: CanvasGestureCallbacks(
+                        onPrimaryTap: { _, _ in
+                            onPointerClick(RFBConstants.PointerButton.left.rawValue)
+                        },
+                        onRightClick: { _ in
+                            onPointerClick(RFBConstants.PointerButton.right.rawValue)
+                        },
+                        onMiddleClick: { _ in
+                            onPointerClick(RFBConstants.PointerButton.middle.rawValue)
+                        },
+                        onTrackpadMove: { delta, _ in
+                            let speed = CGFloat(SettingsStore.shared.trackpadSensitivity) * 1.4
+                            onPointerDelta(delta.width * speed, delta.height * speed, 0)
+                        },
+                        onDragStart: { _ in
+                            isTapDragging = true
+                            onPointerDelta(0, 0, RFBConstants.PointerButton.left.rawValue)
+                        },
+                        onDragMove: { _, delta in
+                            let speed = CGFloat(SettingsStore.shared.trackpadSensitivity) * 1.4
+                            onPointerDelta(delta.width * speed, delta.height * speed, RFBConstants.PointerButton.left.rawValue)
+                        },
+                        onDragEnd: { _ in
+                            isTapDragging = false
+                            onPointerDelta(0, 0, 0)
+                        },
+                        onViewportPanStart: {},
+                        onViewportPan: { _ in },
+                        onViewportPanEnd: { _ in },
+                        onPinchZoom: { _, _, _ in },
+                        onTwoFingerScroll: { delta, _ in
+                            onPointerScroll?(delta)
+                        },
+                        onHoverMove: { _ in }
+                    )
+                )
+                .padding(.bottom, 60)
+            }
             .frame(maxHeight: .infinity)
             .disabled(isInputDisabled)
             .opacity(isInputDisabled ? 0.4 : 1.0)

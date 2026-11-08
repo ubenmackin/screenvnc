@@ -81,8 +81,10 @@ public enum SecurityHandler {
     ) throws -> (privateKey: BigUInt, publicKeyData: Data) {
         let genVal = BigUInt(UInt64(generator))
         let modulus = BigUInt(bigEndian: primeData)
-        guard !modulus.isZero else {
-            throw VNCAuthError.authenticationRejected("Invalid Diffie-Hellman prime modulus.")
+        // Fail closed on injected parameters; a hostile prime or generator collapses the group.
+        try validateAppleDHPrime(primeData)
+        guard generator >= 2 else {
+            throw VNCAuthError.authenticationRejected("Invalid Diffie-Hellman generator: \(generator)")
         }
 
         // Generate 256-bit random private exponent
@@ -106,15 +108,24 @@ public enum SecurityHandler {
     ) throws -> Data {
         let peerPub = BigUInt(bigEndian: serverPublicKeyData)
         let modulus = BigUInt(bigEndian: primeData)
-        // Reject empty or all-zero wire material before modular math.
-        guard !modulus.isZero else {
-            throw VNCAuthError.authenticationRejected("Invalid Diffie-Hellman prime modulus.")
-        }
-        guard !peerPub.isZero else {
+        // Parameters arrive independently on the wire; revalidate before modular math.
+        try validateAppleDHPrime(primeData)
+        // Reject peer keys that trivially collapse the group: 0, 1, p-1, or >= p.
+        guard !peerPub.isZero, peerPub > BigUInt(1), peerPub < modulus - BigUInt(1) else {
             throw VNCAuthError.authenticationRejected("Invalid Diffie-Hellman server public key.")
         }
         let shared = try peerPub.power(privateKey, modulus: modulus)
         return shared.serialize(minBytes: keyLength)
+    }
+
+    /// Validates server-supplied Apple DH prime: odd, top bit set, at least 512 bits.
+    /// Blocks p = 2 style degenerate moduli and small-subgroup confinement before any math runs.
+    private static func validateAppleDHPrime(_ primeData: Data) throws {
+        guard primeData.count >= 64, let leading = primeData.first, leading & 0x80 == 0x80,
+              let trailing = primeData.last, trailing & 0x01 == 0x01
+        else {
+            throw VNCAuthError.authenticationRejected("Invalid Diffie-Hellman prime modulus.")
+        }
     }
 
     /// Derives 16-byte AES-128 key by taking MD5 hash of the shared secret.

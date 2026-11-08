@@ -36,6 +36,33 @@ public struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Trackpad Speed")
+                            Spacer()
+                            Text("\(settings.trackpadSensitivity, specifier: "%.1f")×")
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $settings.trackpadSensitivity, in: 0.5 ... 2.5, step: 0.1)
+                    }
+
+                    Picker("Two-Finger Drag (Trackpad)", selection: $settings.twoFingerTrackpadAction) {
+                        ForEach(TwoFingerTrackpadAction.allCases, id: \.self) { action in
+                            Text(action.displayName).tag(action)
+                        }
+                    }
+
+                    Toggle("Natural Scrolling", isOn: $settings.naturalScrolling)
+                    Toggle("Invert Pan Direction", isOn: $settings.invertPanDirection)
+                    Toggle("Tap to Click (Trackpad)", isOn: $settings.tapToClickInTrackpad)
+                } header: {
+                    Text("Interaction & Gestures")
+                } footer: {
+                    Text("Natural Scrolling matches macOS touch direction; turn off if remote scrolling moves opposite to your fingers.")
+                }
+
                 if DeviceMode.shouldUseCompactIcons(deviceMode: deviceMode) {
                     Section("Foldable & Tabletop (iPhone Duo)") {
                         DisclosureGroup(isExpanded: $isTabletopExpanded) {

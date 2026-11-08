@@ -46,4 +46,15 @@ public enum RFBConstants {
         case bell = 2
         case serverCutText = 3
     }
+
+    public enum PointerButton: UInt8, Sendable {
+        case none = 0x00
+        case left = 0x01
+        case middle = 0x02
+        case right = 0x04
+        case scrollUp = 0x08
+        case scrollDown = 0x10
+        case scrollLeft = 0x20
+        case scrollRight = 0x40
+    }
 }

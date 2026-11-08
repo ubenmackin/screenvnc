@@ -12,6 +12,8 @@ public final class Framebuffer {
     public private(set) var hasReceivedFirstFrame: Bool = false
     public var cursorPosition: CGPoint = .zero
     public var isCursorVisible: Bool = false
+    public private(set) var cursorImage: CGImage?
+    public private(set) var cursorHotspot: CGPoint = .zero
 
     private var pixelBuffer: Data
     private let bytesPerPixel = 4
@@ -53,20 +55,85 @@ public final class Framebuffer {
         regenerateImage()
     }
 
+    /// Applies a batch of framebuffer operations and regenerates the shared image once.
+    public func applyUpdateBatch(_ ops: [FramebufferUpdateOp]) {
+        var didUpdate = false
+        for op in ops {
+            switch op {
+            case let .raw(rect):
+                if applyRawRectPixels(rect) {
+                    didUpdate = true
+                }
+            case let .copy(dest, srcX, srcY):
+                if applyCopyRectPixels(dest: dest, srcX: srcX, srcY: srcY) {
+                    didUpdate = true
+                }
+            }
+        }
+        guard didUpdate else { return }
+        hasReceivedFirstFrame = true
+        regenerateImage()
+    }
+
+    /// Synthesizes a transparent cursor CGImage from an RFB Cursor pseudo-encoding payload.
+    public func updateCursor(_ decoded: DecodedCursor?) {
+        guard let decoded,
+              decoded.width > 0,
+              decoded.height > 0,
+              let bgra = decoded.premultipliedBGRA(),
+              let provider = CGDataProvider(data: bgra as CFData)
+        else {
+            cursorImage = nil
+            cursorHotspot = .zero
+            isCursorVisible = false
+            return
+        }
+
+        let cursorBitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        cursorImage = CGImage(
+            width: decoded.width,
+            height: decoded.height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: decoded.width * bytesPerPixel,
+            space: colorSpace,
+            bitmapInfo: CGBitmapInfo(rawValue: cursorBitmapInfo),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )
+        cursorHotspot = CGPoint(x: decoded.hotspotX, y: decoded.hotspotY)
+        isCursorVisible = cursorImage != nil
+    }
+
     /// Applies incoming Raw rectangle updates directly into the shared pixel buffer.
     public func applyRawRect(_ rect: DecodedRect) {
-        guard let pixels = rect.pixels, rect.width > 0, rect.height > 0 else { return }
+        guard applyRawRectPixels(rect) else { return }
+        hasReceivedFirstFrame = true
+        regenerateImage()
+    }
+
+    /// Applies hardware-accelerated CopyRect blits within the local framebuffer.
+    public func applyCopyRect(dest: DecodedRect, srcX: Int, srcY: Int) {
+        guard applyCopyRectPixels(dest: dest, srcX: srcX, srcY: srcY) else { return }
+        hasReceivedFirstFrame = true
+        regenerateImage()
+    }
+
+    private func applyRawRectPixels(_ rect: DecodedRect) -> Bool {
+        guard let pixels = rect.pixels, rect.width > 0, rect.height > 0 else { return false }
         // Reject negative origins outright; memcpy cannot rewind the buffer safely.
-        guard rect.originX >= 0, rect.originY >= 0, rect.originX < width, rect.originY < height else { return }
+        guard rect.originX >= 0, rect.originY >= 0, rect.originX < width, rect.originY < height else { return false }
         // Clip overhang so row copies never spill into the next scanline.
         let visibleWidth = min(rect.width, width - rect.originX)
         let visibleHeight = min(rect.height, height - rect.originY)
-        guard visibleWidth > 0, visibleHeight > 0 else { return }
+        guard visibleWidth > 0, visibleHeight > 0 else { return false }
         // Fail closed on truncated payloads or overflowing dimensions.
         let (rowBytes, rowOverflow) = rect.width.multipliedReportingOverflow(by: bytesPerPixel)
-        guard !rowOverflow else { return }
+        guard !rowOverflow else { return false }
         let (expectedBytes, expOverflow) = rowBytes.multipliedReportingOverflow(by: rect.height)
-        guard !expOverflow, pixels.count >= expectedBytes else { return }
+        guard !expOverflow, pixels.count >= expectedBytes else { return false }
         let rectRowBytes = rect.width * bytesPerPixel
         let copyBytes = visibleWidth * bytesPerPixel
         var didCopyRow = false
@@ -87,25 +154,21 @@ public final class Framebuffer {
                 }
             }
         }
-        // Flip readiness only when at least one row landed; keeps spinner honest.
-        guard didCopyRow else { return }
-        hasReceivedFirstFrame = true
-        regenerateImage()
+        return didCopyRow
     }
 
-    /// Applies hardware-accelerated CopyRect blits within the local framebuffer.
-    public func applyCopyRect(dest: DecodedRect, srcX: Int, srcY: Int) {
-        guard dest.width > 0, dest.height > 0 else { return }
+    private func applyCopyRectPixels(dest: DecodedRect, srcX: Int, srcY: Int) -> Bool {
+        guard dest.width > 0, dest.height > 0 else { return false }
         // Reject negative origins outright; memmove cannot rewind the buffer safely.
         guard dest.originX >= 0, dest.originY >= 0, srcX >= 0, srcY >= 0,
               dest.originX < width, dest.originY < height, srcX < width, srcY < height
-        else { return }
+        else { return false }
         // Fail closed unless both rects fit entirely; avoids wrap-around blits.
         guard dest.width <= width - dest.originX,
               dest.height <= height - dest.originY,
               dest.width <= width - srcX,
               dest.height <= height - srcY
-        else { return }
+        else { return false }
         let blitRowBytes = dest.width * bytesPerPixel
         var didMoveRow = false
 
@@ -124,10 +187,7 @@ public final class Framebuffer {
                 }
             }
         }
-        // Flip readiness only when at least one row moved; keeps spinner honest.
-        guard didMoveRow else { return }
-        hasReceivedFirstFrame = true
-        regenerateImage()
+        return didMoveRow
     }
 
     private func regenerateImage() {

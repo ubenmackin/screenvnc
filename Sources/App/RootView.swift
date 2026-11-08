@@ -62,27 +62,15 @@ public struct RootView: View {
             }
         }
         .sheet(isPresented: $isPresentingNewProfile) {
-            EditProfileView(deviceMode: currentDeviceMode) { profile, password in
+            EditProfileView(deviceMode: currentDeviceMode) { profile, passwordEdit in
                 profileStore.save(profile)
-                if let password {
-                    do {
-                        try KeychainManager.shared.savePassword(password, for: profile.id)
-                    } catch {
-                        logger.error("Failed to save credentials for profile \(profile.id): \(error.localizedDescription)")
-                    }
-                }
+                applyPasswordEdit(passwordEdit, for: profile.id)
             }
         }
         .sheet(item: $profileToEdit) { profile in
-            EditProfileView(profileToEdit: profile, deviceMode: currentDeviceMode) { updated, password in
+            EditProfileView(profileToEdit: profile, deviceMode: currentDeviceMode) { updated, passwordEdit in
                 profileStore.save(updated)
-                if let password {
-                    do {
-                        try KeychainManager.shared.savePassword(password, for: updated.id)
-                    } catch {
-                        logger.error("Failed to save credentials for updated profile \(updated.id): \(error.localizedDescription)")
-                    }
-                }
+                applyPasswordEdit(passwordEdit, for: updated.id)
             }
         }
         .sheet(isPresented: $isPresentingSettings) {
@@ -261,6 +249,23 @@ public struct RootView: View {
             onToggleFavorite: { profileStore.toggleFavorite(for: profile.id) },
             onDelete: { profileStore.remove(id: profile.id) }
         )
+    }
+
+    /// Applies the editor's credential verdict to the Keychain: update, clear,
+    /// or leave untouched. Clearing must delete or a stale credential survives.
+    private func applyPasswordEdit(_ edit: PasswordEdit, for profileId: UUID) {
+        switch edit {
+        case .unchanged:
+            break
+        case let .update(password):
+            do {
+                try KeychainManager.shared.savePassword(password, for: profileId)
+            } catch {
+                logger.error("Failed to save credentials for profile \(profileId): \(error.localizedDescription)")
+            }
+        case .clear:
+            KeychainManager.shared.deletePassword(for: profileId)
+        }
     }
 
     private func startConnection(_ profile: ConnectionProfile) {

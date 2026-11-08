@@ -59,12 +59,12 @@ extension VNCClient {
         if numTypes == 0 {
             let reasonLenData = try await readExact(4)
             let len = Int(reasonLenData.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian })
-            // Bound failure reason before allocating; fail closed on excess.
-            guard len <= 1_048_576 else {
+            // Fail closed on oversized reasons; server text is untrusted and must not allocate.
+            guard len <= VNCClient.maxWireReasonLength else {
                 throw VNCAuthError.authenticationRejected("Security failure reason too large.")
             }
             let reasonData = try await readExact(len)
-            let reason = String(data: reasonData, encoding: .utf8) ?? "Unknown security error"
+            let reason = VNCClient.sanitizedWireReason(from: reasonData)
             throw VNCAuthError.authenticationRejected(reason)
         }
 
@@ -104,7 +104,8 @@ extension VNCClient {
             }
             let generator = (UInt16(firstByte) << 8) | UInt16(paramHeader[1])
             let keyLength = Int((UInt16(paramHeader[2]) << 8) | UInt16(paramHeader[3]))
-            guard keyLength > 0, keyLength <= 1024 else {
+            // Key length sizes the prime read below; below 512 bits parameters fail validation.
+            guard keyLength >= 64, keyLength <= 1024 else {
                 throw VNCAuthError.authenticationRejected("Invalid Apple DH key length: \(keyLength)")
             }
 
@@ -182,29 +183,33 @@ extension VNCClient {
         }
     }
 
+    /// Enforces the profile's preferred security type; absent support fails closed
+    /// instead of silently downgrading to a weaker type.
     private func chooseSecurityType(
         from serverTypes: Data,
         preferred: AuthMethod,
         host: String
     ) throws -> RFBConstants.SecurityType {
         let types = Set(serverTypes.map(\.self))
-        if preferred == .appleDH, types.contains(RFBConstants.SecurityType.appleDH.rawValue) {
+        switch preferred {
+        case .appleDH:
+            guard types.contains(RFBConstants.SecurityType.appleDH.rawValue) else {
+                throw VNCAuthError.authenticationRejected("Server does not offer the required Apple DH security; refusing a weaker fallback.")
+            }
             return .appleDH
-        }
-        if preferred == .vncDES, types.contains(RFBConstants.SecurityType.vncAuth.rawValue) {
+        case .vncDES:
+            // VNC-DES challenge response is offline-crackable; never accept it unsolicited.
+            guard types.contains(RFBConstants.SecurityType.vncAuth.rawValue) else {
+                throw VNCAuthError.authenticationRejected("Server does not offer the required VNC password security; refusing a weaker fallback.")
+            }
             return .vncAuth
-        }
-        if types.contains(RFBConstants.SecurityType.vncAuth.rawValue) {
-            return .vncAuth
-        }
-        if types.contains(RFBConstants.SecurityType.appleDH.rawValue) {
-            return .appleDH
-        }
-        // Offer None only to loopback hosts; otherwise treat as no mutual support.
-        if types.contains(RFBConstants.SecurityType.none.rawValue), isLoopbackHost(host) {
+        case .none:
+            // None stays loopback-only and must be the profile's own choice, never a fallback.
+            guard types.contains(RFBConstants.SecurityType.none.rawValue), isLoopbackHost(host) else {
+                throw VNCAuthError.authenticationRejected("Unauthenticated security is loopback-only and must be offered by the server.")
+            }
             return .none
         }
-        throw VNCAuthError.unsupportedSecurityType(serverTypes.first ?? 0)
     }
 
     /// Loopback allowlist gates None auth to local-only hosts.
@@ -225,6 +230,7 @@ extension VNCClient {
         let encodings: [RFBConstants.Encoding] = [
             .raw,
             .copyRect,
+            .cursor,
             .desktopSize,
             .lastRect
         ]

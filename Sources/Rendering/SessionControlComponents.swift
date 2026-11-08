@@ -145,24 +145,48 @@ public struct SessionModifierButton: View {
 /// Shared Mac shortcut menu; single list of remote action identifiers.
 public struct SessionMacActionsMenu: View {
     public var onSendShortcut: @MainActor (String) -> Void
+    public var onResetZoom: (@MainActor () -> Void)?
+    public var onShowGestureGuide: (@MainActor () -> Void)?
     public var isInputDisabled: Bool
 
     public init(
         onSendShortcut: @escaping @MainActor (String) -> Void,
+        onResetZoom: (@MainActor () -> Void)? = nil,
+        onShowGestureGuide: (@MainActor () -> Void)? = nil,
         isInputDisabled: Bool = false
     ) {
         self.onSendShortcut = onSendShortcut
+        self.onResetZoom = onResetZoom
+        self.onShowGestureGuide = onShowGestureGuide
         self.isInputDisabled = isInputDisabled
     }
 
     public var body: some View {
         Menu {
-            Button("⌘ + Tab (App Switcher)") { onSendShortcut("cmd_tab") }
-            Button("⌘ + Space (Spotlight)") { onSendShortcut("spotlight") }
-            Button("⌃ + ↑ (Mission Control)") { onSendShortcut("mission_control") }
-            Button("⌘ + W (Close Window)") { onSendShortcut("close_window") }
-            Button("⌘ + Q (Quit App)") { onSendShortcut("quit_app") }
-            Button("⌃ + ⌘ + Q (Lock Mac)") { onSendShortcut("lock_mac") }
+            Section("Mac Shortcuts") {
+                Button("⌘ + Tab (App Switcher)") { onSendShortcut("cmd_tab") }
+                Button("⌘ + Space (Spotlight)") { onSendShortcut("spotlight") }
+                Button("⌃ + ↑ (Mission Control)") { onSendShortcut("mission_control") }
+                Button("⌘ + W (Close Window)") { onSendShortcut("close_window") }
+                Button("⌘ + Q (Quit App)") { onSendShortcut("quit_app") }
+                Button("⌃ + ⌘ + Q (Lock Mac)") { onSendShortcut("lock_mac") }
+            }
+            .disabled(isInputDisabled)
+
+            if onResetZoom != nil || onShowGestureGuide != nil {
+                Section("Viewer") {
+                    if let onResetZoom {
+                        Button("Reset Zoom & Pan", systemImage: "arrow.up.left.and.down.right.magnifyingglass") {
+                            onResetZoom()
+                        }
+                    }
+                    if let onShowGestureGuide {
+                        Button("Gesture Guide", systemImage: "hand.raised") {
+                            onShowGestureGuide()
+                        }
+                    }
+                }
+            }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 18))
@@ -171,7 +195,5 @@ public struct SessionMacActionsMenu: View {
                 .foregroundStyle(.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .disabled(isInputDisabled)
-        .opacity(isInputDisabled ? 0.4 : 1.0)
     }
 }

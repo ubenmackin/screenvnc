@@ -10,6 +10,8 @@ public struct OuterScreenRailView: View {
     public var onSendShortcut: @MainActor (String) -> Void
     public var onToggleDisplayPreference: @MainActor () -> Void
     public var onDisconnect: @MainActor () -> Void
+    public var onResetZoom: (@MainActor () -> Void)?
+    public var onShowGestureGuide: (@MainActor () -> Void)?
     public var isInputDisabled: Bool = false
 
     @State private var isCollapsed: Bool = false
@@ -23,6 +25,8 @@ public struct OuterScreenRailView: View {
         onSendShortcut: @escaping @MainActor (String) -> Void,
         onToggleDisplayPreference: @escaping @MainActor () -> Void,
         onDisconnect: @escaping @MainActor () -> Void,
+        onResetZoom: (@MainActor () -> Void)? = nil,
+        onShowGestureGuide: (@MainActor () -> Void)? = nil,
         isInputDisabled: Bool = false
     ) {
         _activeModifiers = activeModifiers
@@ -33,6 +37,8 @@ public struct OuterScreenRailView: View {
         self.onSendShortcut = onSendShortcut
         self.onToggleDisplayPreference = onToggleDisplayPreference
         self.onDisconnect = onDisconnect
+        self.onResetZoom = onResetZoom
+        self.onShowGestureGuide = onShowGestureGuide
         self.isInputDisabled = isInputDisabled
     }
 
@@ -109,6 +115,8 @@ public struct OuterScreenRailView: View {
                 // Quick Mac Actions Menu
                 SessionMacActionsMenu(
                     onSendShortcut: onSendShortcut,
+                    onResetZoom: onResetZoom,
+                    onShowGestureGuide: onShowGestureGuide,
                     isInputDisabled: isInputDisabled
                 )
             }
