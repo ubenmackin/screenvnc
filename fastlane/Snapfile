@@ -10,6 +10,6 @@ clear_previous_screenshots(false)
 concurrent_simulators(false)
 # Every lane passes localize_simulator false; the default mirrors that contract.
 localize_simulator(false)
-launch_arguments(["-ScreenVNCScreenshots"])
+launch_arguments(["-uitesting true --create-sample-data -ScreenVNCScreenshots"])
 only_testing(["ScreenVNCUITests/ScreenVNCScreenshots"])
 number_of_retries(0)

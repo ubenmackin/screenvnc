@@ -3,7 +3,9 @@ import SwiftUI
 
 @main
 public struct ScreenVNCApp: App {
-    public init() {}
+    public init() {
+        SampleDataSeeder.seedIfRequested()
+    }
 
     public var body: some Scene {
         WindowGroup {

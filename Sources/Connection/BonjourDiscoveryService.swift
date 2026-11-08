@@ -83,6 +83,11 @@ public final class BonjourDiscoveryService {
         isScanning = false
     }
 
+    /// Preloads sample hosts for UI screenshot testing and previews.
+    public func seedSampleDiscoveredHosts(_ hosts: [DiscoveredHost]) {
+        discoveredHosts = hosts
+    }
+
     private func handleResults(_ results: Set<NWBrowser.Result>) {
         var seen = Set<String>()
         var hosts: [DiscoveredHost] = []
