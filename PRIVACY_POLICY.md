@@ -4,12 +4,13 @@
 
 ## Our Commitment
 
-We don't track or use your data off device. Ever.
+We don't track you, and no ScreenVNC server ever receives your data. Ever.
 
 ## Summary
 
 - **No personal data collection** - We don't collect names, emails, or phone numbers
-- **No servers** - Everything happens on your device
+- **No servers** - We operate no servers; the only data that leaves your device is connection profile metadata backed up through your own Apple iCloud account, and only when iCloud is enabled
+- **Passwords never leave your device** - Connection passwords stay in this device's Keychain and never sync anywhere
 - **No tracking** - We have no analytics, telemetry, or user tracking
 
 ## What Information ScreenVNC Stores
@@ -19,25 +20,30 @@ We don't track or use your data off device. Ever.
 Your connection profiles stay on your device with zero tracking.
 
 1. **Connection profiles**
-   - Host, port, credentials, and display options for your saved hosts
-   - Stored in SwiftData; per-host display preferences stored in UserDefaults
+   - Host, port, username, and display/connection settings for your saved hosts
+   - Stored as a JSON file in the app's Application Support folder (ScreenVNC does not use SwiftData); per-host display preferences stored in UserDefaults
    - No web history is collected and no websites visited are recorded
    - You can add or delete saved profiles in-app
 
+2. **Passwords**
+   - Connection passwords are stored only in the iOS Keychain, marked device-only so they never sync to iCloud or any other device
+   - Passwords are excluded from profile backups entirely, which is why restored hosts always ask for credentials again on first connect
+
 ### Off Your Device
 
-1. **None**
+**iCloud profile backup (only when iCloud is enabled)** - Your connection profile metadata (host, port, username, and connection settings) replicates through Apple's iCloud Key-Value Store so it can be restored after a reinstall or when moving to a new device. This traffic flows only between your devices and Apple's iCloud infrastructure; ScreenVNC runs no servers and never transmits anything itself, and passwords are never part of this backup.
 
 ## What Information is Shared
 
-None!
+- **With Apple (only when iCloud is enabled):** connection profile metadata, via Apple's iCloud Key-Value Store and governed by your Apple iCloud terms
+- **With anyone else, including us:** Never. Passwords stay exclusively in your device Keychain and are never shared with Apple or any third party.
 
 ## What We DON'T Do
 
 ScreenVNC **never**:
 - Collects personal information
 - Tracks your location
-- Stores data on servers
+- Stores data on ScreenVNC servers
 - Shares data with third parties
 - Uses analytics or telemetry
 - Requires registration

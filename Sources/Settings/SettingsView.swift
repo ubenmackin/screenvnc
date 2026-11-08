@@ -4,6 +4,7 @@ import SwiftUI
 public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable private var settings = SettingsStore.shared
+    @Bindable private var cloudSync = CloudSyncCoordinator.shared
     public var deviceMode: DeviceMode
 
     @State private var isTabletopExpanded: Bool = true
@@ -79,20 +80,74 @@ public struct SettingsView: View {
                     Toggle("View Only Mode (Disable Input)", isOn: $settings.viewOnly)
                 }
 
-                Section("iCloud Synchronization") {
-                    HStack {
-                        Image(systemName: "icloud.fill")
-                            .foregroundStyle(Color.accentColor)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("iCloud Sync Active")
-                                .font(.subheadline.bold())
-                            Text("Connection profiles automatically sync across iPhone, iPad, and iPhone Duo.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: cloudSync.accountStatus == .available ? "icloud.fill" : "icloud.slash")
+                            .font(.title2)
+                            .foregroundStyle(cloudSync.statusColor)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(cloudSync.syncHealth.displayText)
+                                    .font(.subheadline.bold())
+                                if cloudSync.isSyncing {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                }
+                            }
+
+                            if let lastSync = cloudSync.lastSyncedAt {
+                                Text("Last synced \(lastSync.formatted(.relative(presentation: .named)))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Status: \(cloudSync.accountStatus.displayName)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .padding(.vertical, 4)
+
+                    Button {
+                        Task {
+                            await cloudSync.triggerManualSync()
+                        }
+                    } label: {
+                        HStack {
+                            Text("Sync Now")
+                            Spacer()
+                            if cloudSync.isSyncing {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                        }
+                    }
+                    .disabled(cloudSync.isSyncing || cloudSync.accountStatus == .noAccount)
+
+                    if let cloudProfiles = cloudSync.cloudProfilesSnapshot, !cloudProfiles.isEmpty {
+                        Button {
+                            cloudSync.presentRestoreSheetManually()
+                        } label: {
+                            HStack {
+                                Text("Restore from iCloud Backup")
+                                Spacer()
+                                Text("\(cloudProfiles.count) host\(cloudProfiles.count == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("iCloud Synchronization")
+                } footer: {
+                    Text("Connection profiles automatically sync across iPhone, iPad, and iPhone Duo. Passwords stay securely in this device's Keychain.")
                 }
+            }
+            .task {
+                await cloudSync.checkAccountStatus()
+                _ = cloudSync.checkForCloudProfiles()
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

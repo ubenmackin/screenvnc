@@ -18,6 +18,7 @@ public struct RootView: View {
     private var profileStore = ProfileStore.shared
     private var discoveryService = BonjourDiscoveryService.shared
     private var settings = SettingsStore.shared
+    @Bindable private var cloudSync = CloudSyncCoordinator.shared
     private let logger = Logger(subsystem: "com.volcrypt.ScreenVNC", category: "RootView")
 
     @State private var selectedProfile: ConnectionProfile?
@@ -93,6 +94,12 @@ public struct RootView: View {
         }
         .sheet(isPresented: $isPresentingSettings) {
             SettingsView(deviceMode: currentDeviceMode)
+        }
+        .sheet(item: $cloudSync.restoreOffer) { offer in
+            RestoreCloudProfilesView(profiles: offer.profiles)
+        }
+        .task {
+            await cloudSync.scanForExistingCloudProfilesOnLaunch()
         }
         .onAppear {
             if settings.autoDiscoverBonjour {

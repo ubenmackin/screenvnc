@@ -62,6 +62,32 @@ public final class ProfileStore {
         persist()
     }
 
+    /// Inspects the current iCloud KVS payload without modifying local profiles.
+    public func fetchCloudProfiles() -> [ConnectionProfile]? {
+        guard let cloudData = NSUbiquitousKeyValueStore.default.data(forKey: kvsKey) else { return nil }
+        do {
+            let decoded = try JSONDecoder().decode([ConnectionProfile].self, from: cloudData)
+            let valid = validated(decoded)
+            return valid.isEmpty ? nil : valid
+        } catch {
+            logger.warning("Failed to decode iCloud KVS profiles payload: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Restores the provided profiles from iCloud, writes to local disk and confirms sync.
+    public func restoreFromCloud(_ cloudProfiles: [ConnectionProfile]) {
+        let valid = validated(cloudProfiles)
+        profiles = valid
+        persist()
+    }
+
+    /// Overwrites the iCloud KVS backup with the provided profiles.
+    public func overwriteCloud(with cleanProfiles: [ConnectionProfile] = []) {
+        profiles = cleanProfiles
+        persist()
+    }
+
     private func persist() {
         do {
             let data = try JSONEncoder().encode(profiles)
@@ -69,13 +95,14 @@ public final class ProfileStore {
             // Synchronize with iCloud Key-Value Store for cross-device persistence.
             NSUbiquitousKeyValueStore.default.set(data, forKey: kvsKey)
             NSUbiquitousKeyValueStore.default.synchronize()
+            CloudSyncCoordinator.shared.recordSuccessfulSync()
         } catch {
             logger.error("Failed to persist profiles: \(error.localizedDescription)")
         }
     }
 
     private func load() {
-        // Prefer local copy; fallback to iCloud KVS payload on fresh installs.
+        // Prefer local copy.
         do {
             let localData = try Data(contentsOf: fileURL)
             let decoded = try JSONDecoder().decode([ConnectionProfile].self, from: localData)
@@ -87,25 +114,12 @@ public final class ProfileStore {
             }
             return
         } catch {
-            logger.debug("Local profiles unreadable or not present, checking cloud: \(error.localizedDescription)")
+            logger.debug("Local profiles unreadable or not present: \(error.localizedDescription)")
         }
 
-        if let cloudData = NSUbiquitousKeyValueStore.default.data(forKey: kvsKey) {
-            do {
-                let decoded = try JSONDecoder().decode([ConnectionProfile].self, from: cloudData)
-                let valid = validated(decoded)
-                profiles = valid
-                if valid.count == decoded.count {
-                    try cloudData.write(to: fileURL, options: .atomic)
-                } else {
-                    // Cache clean subset only; poisoned bytes never reach disk.
-                    let clean = try JSONEncoder().encode(valid)
-                    try clean.write(to: fileURL, options: .atomic)
-                }
-            } catch {
-                logger.warning("Failed to decode iCloud KVS profiles payload: \(error.localizedDescription)")
-            }
-        }
+        // Fresh installs do not silently adopt cloud profiles.
+        // CloudSyncCoordinator will inspect KVS and prompt the user if prior profiles exist.
+        profiles = []
     }
 
     private func setupCloudSync() {
@@ -118,6 +132,10 @@ public final class ProfileStore {
     }
 
     private func handleCloudUpdate() {
+        guard SettingsStore.shared.hasCompletedInitialSetup else {
+            logger.debug("Ignoring external iCloud update before initial setup completion")
+            return
+        }
         guard let cloudData = NSUbiquitousKeyValueStore.default.data(forKey: kvsKey) else { return }
         do {
             let decoded = try JSONDecoder().decode([ConnectionProfile].self, from: cloudData)
@@ -130,6 +148,7 @@ public final class ProfileStore {
                 let clean = try JSONEncoder().encode(valid)
                 try clean.write(to: fileURL, options: .atomic)
             }
+            CloudSyncCoordinator.shared.recordSuccessfulSync()
         } catch {
             logger.warning("Failed to decode external iCloud profiles update: \(error.localizedDescription)")
         }
