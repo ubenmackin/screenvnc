@@ -3,7 +3,7 @@
 set -euo pipefail
 
 VERSION="0.3.0"
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 HELPER_SRC="$SCRIPT_DIR/hinge_helper.m"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hinge"
 DEVICE="${HINGE_DEVICE:-}"

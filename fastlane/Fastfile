@@ -87,26 +87,45 @@ def prepare_simulator(device_name)
   udid
 end
 
-# Resolves the Outer Display devicetype only; never substitutes another type.
+# Resolves the Outer Display devicetype; falls back to iPhone Duo type.
 # nil lets the caller abort fail-closed with the full diagnostic listing.
 def duo_outer_devicetype_id(devicetypes_json)
   require "json"
   types = JSON.parse(devicetypes_json)["devicetypes"] || []
-  outer = types.find { |t| t["name"] == "iPhone Duo - Outer Display" }
+  outer = types.find { |t| t["name"] == "iPhone Duo - Outer Display" } ||
+          types.find { |t| t["name"] == "iPhone Duo" }
   return outer["identifier"] if outer && outer["identifier"]
   nil
 rescue JSON::ParserError
   nil
 end
 
-# Picks the newest available iOS runtime for simulator creation.
-def newest_ios_runtime_id(runtimes_json)
+# Resolves the iPad Air 13 devicetype.
+def ipad_devicetype_id(devicetypes_json)
+  require "json"
+  types = JSON.parse(devicetypes_json)["devicetypes"] || []
+  ipad = types.find { |t| t["name"] == "iPad Air 13-inch (M3)" } ||
+         types.find { |t| t["name"] == "iPad Air 13-inch (M4)" } ||
+         types.find { |t| t["name"] == "iPad Air 13-inch (M2)" }
+  return ipad["identifier"] if ipad && ipad["identifier"]
+  nil
+rescue JSON::ParserError
+  nil
+end
+
+# Picks the newest available iOS runtime, matching the device type when provided.
+def newest_ios_runtime_id(runtimes_json, device_type_id = nil)
   require "json"
   runtimes = JSON.parse(runtimes_json)["runtimes"] || []
   ios = runtimes.select do |r|
     next false if r["isAvailable"] == false
     next false if r["availability"].to_s.include?("unavailable")
-    "#{r["name"]} #{r["versionString"]}".include?("iOS")
+    next false unless "#{r["name"]} #{r["versionString"]}".include?("iOS")
+    if device_type_id
+      supported = r["supportedDeviceTypes"] || []
+      next false unless supported.any? { |t| t["identifier"] == device_type_id }
+    end
+    true
   end
   return nil if ios.empty?
   sorted = ios.sort_by do |r|
@@ -131,7 +150,7 @@ def ensure_outer_display_simulator
   devicetypes_json = sh("xcrun simctl list devicetypes -j", log: false)
   runtimes_json = sh("xcrun simctl list runtimes -j", log: false)
   device_type_id = duo_outer_devicetype_id(devicetypes_json)
-  runtime_id = newest_ios_runtime_id(runtimes_json)
+  runtime_id = newest_ios_runtime_id(runtimes_json, device_type_id)
   if device_type_id.nil? || runtime_id.nil?
     names = JSON.parse(listing)["devices"].values.flatten.map { |d| d["name"] }.compact.uniq.sort
     types = JSON.parse(devicetypes_json)["devicetypes"].map { |t| t["name"] }.compact.sort
@@ -141,6 +160,27 @@ def ensure_outer_display_simulator
   sh("xcrun simctl create \"iPhone Duo - Outer Display\" \"#{device_type_id}\" \"#{runtime_id}\"")
   refreshed = sh("xcrun simctl list devices -j", log: false)
   ensure_simulator_present("iPhone Duo - Outer Display", refreshed)
+  refreshed
+end
+
+# Creates the iPad Air 13-inch (M3) simulator when absent, else aborts fail-closed.
+def ensure_ipad_simulator
+  require "json"
+  listing = sh("xcrun simctl list devices -j", log: false)
+  return listing if simulator_available?("iPad Air 13-inch (M3)", listing)
+  devicetypes_json = sh("xcrun simctl list devicetypes -j", log: false)
+  runtimes_json = sh("xcrun simctl list runtimes -j", log: false)
+  device_type_id = ipad_devicetype_id(devicetypes_json)
+  runtime_id = newest_ios_runtime_id(runtimes_json, device_type_id)
+  if device_type_id.nil? || runtime_id.nil?
+    names = JSON.parse(listing)["devices"].values.flatten.map { |d| d["name"] }.compact.uniq.sort
+    types = JSON.parse(devicetypes_json)["devicetypes"].map { |t| t["name"] }.compact.sort
+    runtimes = JSON.parse(runtimes_json)["runtimes"].map { |r| r["name"] }.compact.sort
+    UI.user_error!("Missing simulator 'iPad Air 13-inch (M3)' and no matching type/runtime to create it.\nAvailable devices:\n#{names.join("\n")}\nDevice types:\n#{types.join("\n")}\nRuntimes:\n#{runtimes.join("\n")}")
+  end
+  sh("xcrun simctl create \"iPad Air 13-inch (M3)\" \"#{device_type_id}\" \"#{runtime_id}\"")
+  refreshed = sh("xcrun simctl list devices -j", log: false)
+  ensure_simulator_present("iPad Air 13-inch (M3)", refreshed)
   refreshed
 end
 
@@ -155,7 +195,7 @@ lane :screenshots_iphone do
     override_status_bar: true,
     clear_previous_screenshots: true,
     localize_simulator: false,
-    launch_arguments: ["-ScreenVNCScreenshots"]
+    launch_arguments: ["-uitesting true --create-sample-data -ScreenVNCScreenshots"]
   )
 end
 
@@ -176,7 +216,21 @@ lane :screenshots_duo_outer do
     override_status_bar: true,
     clear_previous_screenshots: false,
     localize_simulator: false,
-    launch_arguments: ["-ScreenVNCScreenshots"]
+    launch_arguments: ["-uitesting true --create-sample-data -ScreenVNCScreenshots"]
+  )
+end
+
+lane :screenshots_ipad do
+  ensure_ipad_simulator
+  prepare_simulator("iPad Air 13-inch (M3)")
+  # Pre-erased plus pre-booted; appends so prior device output survives.
+  snapshot(
+    devices: ["iPad Air 13-inch (M3)"],
+    erase_simulator: false,
+    override_status_bar: true,
+    clear_previous_screenshots: false,
+    localize_simulator: false,
+    launch_arguments: ["-uitesting true --create-sample-data -ScreenVNCScreenshots -landscape"]
   )
 end
 
@@ -197,7 +251,7 @@ lane :screenshots_duo_inner do
       override_status_bar: true,
       clear_previous_screenshots: false,
       localize_simulator: false,
-      launch_arguments: ["-ScreenVNCScreenshots", "-ScreenVNCInnerDisplay"]
+      launch_arguments: ["-uitesting true --create-sample-data -ScreenVNCScreenshots -ScreenVNCInnerDisplay"]
     )
   ensure
     Process.kill("TERM", watcher_pid) rescue nil
@@ -209,5 +263,5 @@ end
 lane :screenshots_all do
   screenshots_iphone
   screenshots_duo_outer
-  screenshots_duo_inner
+  screenshots_ipad
 end

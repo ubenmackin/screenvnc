@@ -1,0 +1,40 @@
+{
+  "default": {
+    "background": "./fastlane/screenshots/background.jpg",
+    "padding": 50,
+    "title": {
+      "text": "ScreenVNC",
+      "font": "HelveticaNeue-Bold",
+      "size": 60,
+      "color": "#FFFFFF"
+    },
+    "keyword": {
+      "text": "Remote Desktop",
+      "font": "HelveticaNeue",
+      "size": 40,
+      "color": "#007AFF"
+    }
+  },
+  "data": [
+    {
+      "filter": "01Connections",
+      "title": { "text": "Connect to Any Mac" },
+      "keyword": { "text": "Saved & Discovered Hosts" }
+    },
+    {
+      "filter": "02NewConnection",
+      "title": { "text": "Flexible Host Configuration" },
+      "keyword": { "text": "macOS & VNC Security" }
+    },
+    {
+      "filter": "03Settings",
+      "title": { "text": "Custom Display & Controls" },
+      "keyword": { "text": "Biometrics & Discovery" }
+    },
+    {
+      "filter": "04ProfileDetail",
+      "title": { "text": "Optimized for iPad & Foldables" },
+      "keyword": { "text": "Sidebar & Multi-Column View" }
+    }
+  ]
+}

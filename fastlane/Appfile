@@ -1,2 +1,7 @@
-# Fastlane — bundle identifier for screenshot-only lanes.
+# Fastlane Appfile
+# https://docs.fastlane.tools/advanced/#appfile
+
 app_identifier("com.volcrypt.ScreenVNC")
+apple_id(ENV["FASTLANE_USER"] || "bmackin@mac.com")
+itc_team_id(ENV["FASTLANE_ITC_TEAM_ID"] || "")
+team_id(ENV["FASTLANE_TEAM_ID"] || "LYYD96F2J8")
