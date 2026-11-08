@@ -4,6 +4,7 @@ import SwiftUI
 public struct EditProfileView: View {
     @Environment(\.dismiss) private var dismiss
     public var profileToEdit: ConnectionProfile?
+    public var deviceMode: DeviceMode
     public var onSave: @MainActor (ConnectionProfile, String?) -> Void
 
     @State private var name: String = ""
@@ -19,8 +20,13 @@ public struct EditProfileView: View {
     @State private var requiresBiometrics: Bool = false
     @State private var validationError: String?
 
-    public init(profileToEdit: ConnectionProfile? = nil, onSave: @escaping @MainActor (ConnectionProfile, String?) -> Void) {
+    public init(
+        profileToEdit: ConnectionProfile? = nil,
+        deviceMode: DeviceMode = .mode1NormalPhone,
+        onSave: @escaping @MainActor (ConnectionProfile, String?) -> Void
+    ) {
         self.profileToEdit = profileToEdit
+        self.deviceMode = deviceMode
         self.onSave = onSave
     }
 
@@ -83,7 +89,7 @@ public struct EditProfileView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if DeviceModeDetector.isDuoDevice {
+                    if DeviceMode.shouldUseCompactIcons(deviceMode: deviceMode) {
                         Button {
                             dismiss()
                         } label: {
@@ -94,7 +100,7 @@ public struct EditProfileView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    if DeviceModeDetector.isDuoDevice {
+                    if DeviceMode.shouldUseCompactIcons(deviceMode: deviceMode) {
                         Button {
                             saveProfile()
                         } label: {
@@ -157,7 +163,6 @@ public struct EditProfileView: View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedUser = username.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let profile = ConnectionProfile(
             id: profileToEdit?.id ?? UUID(),
@@ -175,7 +180,8 @@ public struct EditProfileView: View {
 
         do {
             try profile.validate()
-            onSave(profile, trimmedPassword.isEmpty ? nil : trimmedPassword)
+            // Passwords may contain leading/trailing spaces; pass through untrimmed.
+            onSave(profile, password.isEmpty ? nil : password)
             dismiss()
         } catch {
             validationError = error.localizedDescription

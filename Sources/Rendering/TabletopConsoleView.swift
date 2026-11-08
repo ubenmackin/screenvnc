@@ -9,7 +9,7 @@ public struct TabletopConsoleView: View {
     public var onSendShortcut: @MainActor (String) -> Void
     public var isInputDisabled: Bool = false
 
-    @State private var trackpadDragStart: CGPoint = .zero
+    @State private var lastTrackpadTranslation: CGSize = .zero
     @State private var isLeftMouseDown = false
     @State private var isRightMouseDown = false
 
@@ -83,9 +83,14 @@ public struct TabletopConsoleView: View {
                     .onChanged { value in
                         // View-only suppresses trackpad deltas.
                         guard !isInputDisabled else { return }
-                        let deltaX = value.translation.width
-                        let deltaY = value.translation.height
+                        // Emit incremental deltas so host accumulates from cursor.
+                        let deltaX = value.translation.width - lastTrackpadTranslation.width
+                        let deltaY = value.translation.height - lastTrackpadTranslation.height
+                        lastTrackpadTranslation = value.translation
                         onPointerDelta(deltaX, deltaY, 0)
+                    }
+                    .onEnded { _ in
+                        lastTrackpadTranslation = .zero
                     }
             )
             .frame(maxHeight: .infinity)
