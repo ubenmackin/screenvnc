@@ -1,4 +1,6 @@
-// Rendering — Zoomable, pannable SwiftUI framebuffer canvas with direct touch and trackpad translation.
+// Rendering — Zoomable, pannable SwiftUI framebuffer canvas with real-time cursor and gesture overlay.
+import Foundation
+import os
 import SwiftUI
 import UIKit
 
@@ -14,53 +16,60 @@ public enum PointerMode: String, CaseIterable, Sendable, Codable {
     }
 }
 
-/// Transparent overlay capturing two-finger taps for remote right-click.
-public struct TwoFingerTapView: UIViewRepresentable {
-    public var onTwoFingerTap: (CGPoint) -> Void
+/// Isolated framebuffer image layer so cursor movement never re-evaluates CGImage modifiers.
+private struct FramebufferCanvasLayer: View {
+    let image: CGImage
+    let contentRect: CGRect
 
-    public init(onTwoFingerTap: @escaping (CGPoint) -> Void) {
-        self.onTwoFingerTap = onTwoFingerTap
+    var body: some View {
+        Image(decorative: image, scale: 1.0, orientation: .up)
+            .interpolation(.high)
+            .resizable()
+            .frame(width: max(contentRect.width, 1), height: max(contentRect.height, 1))
+            .position(x: contentRect.midX, y: contentRect.midY)
     }
+}
 
-    public func makeUIView(context: Context) -> UIView {
-        let view = PassthroughTwoFingerView()
-        view.backgroundColor = .clear
-        let recognizer = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
-        recognizer.numberOfTouchesRequired = 2
-        recognizer.cancelsTouchesInView = false
-        view.addGestureRecognizer(recognizer)
-        return view
-    }
+/// Renders either the remote macOS cursor image (hotspot-aligned) or a crisp virtual dot fallback.
+private struct CursorIndicatorLayer: View {
+    let cursorImage: CGImage?
+    let hotspot: CGPoint
+    let viewPosition: CGPoint
+    let canvasScale: CGFloat
+    let isLeftButtonHeld: Bool
 
-    public func updateUIView(_: UIView, context: Context) {
-        // Refresh closure so rotation/resize uses live geometry.
-        context.coordinator.onTwoFingerTap = onTwoFingerTap
-    }
-
-    public func makeCoordinator() -> Coordinator {
-        Coordinator(onTwoFingerTap: onTwoFingerTap)
-    }
-
-    private final class PassthroughTwoFingerView: UIView {
-        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-            guard let touches = event?.allTouches, touches.count >= 2 else {
-                return nil
+    var body: some View {
+        ZStack {
+            if isLeftButtonHeld {
+                Circle()
+                    .stroke(Color.accentColor.opacity(0.85), lineWidth: 2.5)
+                    .frame(width: 34, height: 34)
+                    .position(x: viewPosition.x, y: viewPosition.y)
             }
-            return super.hitTest(point, with: event)
-        }
-    }
 
-    public final class Coordinator: NSObject {
-        var onTwoFingerTap: (CGPoint) -> Void
-        init(onTwoFingerTap: @escaping (CGPoint) -> Void) {
-            self.onTwoFingerTap = onTwoFingerTap
-        }
+            if let cursorImage {
+                let visualScale = max(0.85, min(canvasScale, 2.0))
+                let drawW = CGFloat(cursorImage.width) * visualScale
+                let drawH = CGFloat(cursorImage.height) * visualScale
+                let centerX = viewPosition.x + (CGFloat(cursorImage.width) * 0.5 - hotspot.x) * visualScale
+                let centerY = viewPosition.y + (CGFloat(cursorImage.height) * 0.5 - hotspot.y) * visualScale
 
-        /// Isolate to MainActor so gesture view APIs are reached safely.
-        @MainActor @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            let point = gesture.location(in: gesture.view)
-            onTwoFingerTap(point)
+                Image(decorative: cursorImage, scale: 1.0, orientation: .up)
+                    .interpolation(.none)
+                    .resizable()
+                    .frame(width: max(drawW, 1), height: max(drawH, 1))
+                    .shadow(color: .black.opacity(0.45), radius: 1.5, x: 0, y: 1)
+                    .position(x: centerX, y: centerY)
+            } else {
+                Circle()
+                    .fill(Color.white.opacity(0.9))
+                    .frame(width: 14, height: 14)
+                    .overlay(Circle().stroke(Color.black.opacity(0.85), lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.4), radius: 2)
+                    .position(x: viewPosition.x, y: viewPosition.y)
+            }
         }
+        .allowsHitTesting(false)
     }
 }
 
@@ -68,58 +77,79 @@ public struct FramebufferView: View {
     public var framebuffer: Framebuffer
     public var displayPreference: DisplayPreference
     public var pointerMode: PointerMode
+    public var sharedCursor: Binding<CGPoint>?
+    public var panInsets: EdgeInsets
+    public var resetTrigger: Int
     public var onPointerEvent: @MainActor (Int, Int, UInt8) -> Void
-    public var isInputDisabled: Bool = false
+    public var onInputCommand: (@MainActor (VNCInputCommand) -> Void)?
+    public var onFlushMoves: (@MainActor () -> Void)?
+    public var isInputDisabled: Bool
 
     @State private var zoomScale: CGFloat = 1.0
-    @State private var lastZoomScale: CGFloat = 1.0
     @State private var panOffset: CGSize = .zero
-    @State private var lastPanOffset: CGSize = .zero
-    @State private var virtualCursor: CGPoint = .zero
+    @State private var internalCursor: CGPoint
+    @State private var isLeftButtonHeld = false
+    @State private var directTouchDragPoint: CGPoint?
+    @State private var isHoverPointerActive = false
+    @State private var scrollAccumulator = ScrollAccumulator()
+    @State private var inertiaTask: Task<Void, Never>?
+    @State private var didApplyInitialPan = false
+
+    private var settings = SettingsStore.shared
+    private let logger = Logger(subsystem: "com.volcrypt.ScreenVNC", category: "FramebufferView")
 
     public init(
         framebuffer: Framebuffer,
         displayPreference: DisplayPreference = .fit,
         pointerMode: PointerMode = .directTouch,
+        sharedCursor: Binding<CGPoint>? = nil,
+        panInsets: EdgeInsets = EdgeInsets(),
+        resetTrigger: Int = 0,
         onPointerEvent: @escaping @MainActor (Int, Int, UInt8) -> Void,
+        onInputCommand: (@MainActor (VNCInputCommand) -> Void)? = nil,
+        onFlushMoves: (@MainActor () -> Void)? = nil,
         isInputDisabled: Bool = false
     ) {
         self.framebuffer = framebuffer
         self.displayPreference = displayPreference
         self.pointerMode = pointerMode
+        self.sharedCursor = sharedCursor
+        self.panInsets = panInsets
+        self.resetTrigger = resetTrigger
         self.onPointerEvent = onPointerEvent
+        self.onInputCommand = onInputCommand
+        self.onFlushMoves = onFlushMoves
         self.isInputDisabled = isInputDisabled
-        // Derive initial cursor from live canvas; never hardcode layout points.
-        _virtualCursor = State(initialValue: CGPoint(
+        let initial = sharedCursor?.wrappedValue ?? CGPoint(
             x: CGFloat(max(framebuffer.width, 1)) / 2.0,
             y: CGFloat(max(framebuffer.height, 1)) / 2.0
-        ))
+        )
+        _internalCursor = State(initialValue: initial)
+    }
+
+    private var activeCursor: CGPoint {
+        sharedCursor?.wrappedValue ?? internalCursor
+    }
+
+    private func setActiveCursor(_ point: CGPoint) {
+        let clamped = clampRemotePoint(point)
+        internalCursor = clamped
+        sharedCursor?.wrappedValue = clamped
+        framebuffer.cursorPosition = clamped
     }
 
     public var body: some View {
         GeometryReader { geometry in
+            let transform = makeTransform(in: geometry.size)
+            let contentRect = transform.transformedContentRect
+            let cursorViewPos = transform.convertToView(remotePoint: activeCursor)
+            let canvasScale = contentRect.width / CGFloat(max(framebuffer.width, 1))
+
             ZStack {
                 Color.black
 
                 if framebuffer.hasReceivedFirstFrame, let image = framebuffer.image {
-                    let canvasImage = Image(decorative: image, scale: 1.0, orientation: .up)
-                        .interpolation(.high)
-                        .resizable()
-
-                    Group {
-                        switch displayPreference {
-                        case .fit:
-                            canvasImage.scaledToFit()
-                        case .fill:
-                            canvasImage.scaledToFill()
-                        case .actualSize:
-                            canvasImage.frame(width: CGFloat(framebuffer.width), height: CGFloat(framebuffer.height))
-                        }
-                    }
-                    .scaleEffect(zoomScale)
-                    .offset(panOffset)
-                    .gesture(magnificationGesture)
-                    .gesture(pointerGesture(in: geometry.size))
+                    FramebufferCanvasLayer(image: image, contentRect: contentRect)
                 } else {
                     VStack(spacing: 12) {
                         ProgressView()
@@ -131,209 +161,516 @@ public struct FramebufferView: View {
                     }
                 }
 
-                if pointerMode == .virtualTrackpad {
-                    // Local virtual cursor indicator mapped to view space
-                    let viewPos = convertToView(remotePoint: virtualCursor, in: geometry.size)
+                if pointerMode == .virtualTrackpad || isHoverPointerActive {
+                    CursorIndicatorLayer(
+                        cursorImage: framebuffer.cursorImage,
+                        hotspot: framebuffer.cursorHotspot,
+                        viewPosition: cursorViewPos,
+                        canvasScale: canvasScale,
+                        isLeftButtonHeld: isLeftButtonHeld
+                    )
+                } else if let dragPoint = directTouchDragPoint {
                     Circle()
-                        .fill(Color.white.opacity(0.85))
-                        .frame(width: 14, height: 14)
-                        .overlay(Circle().stroke(Color.black, lineWidth: 1.5))
-                        .position(x: viewPos.x, y: viewPos.y)
-                        .shadow(radius: 2)
+                        .stroke(Color.accentColor.opacity(0.9), lineWidth: 2.5)
+                        .frame(width: 38, height: 38)
+                        .position(x: dragPoint.x, y: dragPoint.y)
                         .allowsHitTesting(false)
                 }
 
-                // Two-finger tap detector overlay for right click
-                TwoFingerTapView { point in
-                    handleTwoFingerTap(at: point, in: geometry.size)
+                CanvasGestureOverlay(
+                    configuration: CanvasGestureConfiguration(
+                        pointerMode: pointerMode,
+                        canPan: transform.canPan,
+                        isInputDisabled: isInputDisabled,
+                        tapToClickInTrackpad: settings.tapToClickInTrackpad,
+                        twoFingerTrackpadAction: settings.twoFingerTrackpadAction
+                    ),
+                    callbacks: makeCallbacks(in: geometry.size)
+                )
+
+                if shouldShowZoomBadge(in: geometry.size) {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button {
+                                resetViewport(in: geometry.size, animated: true)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text("\(effectiveZoomLabel(in: geometry.size))")
+                                        .font(.caption.monospacedDigit().bold())
+                                    Image(systemName: "arrow.counterclockwise")
+                                        .font(.caption.bold())
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Capsule())
+                                .shadow(radius: 4)
+                            }
+                            .padding(.top, max(panInsets.top, 12))
+                            .padding(.trailing, max(panInsets.trailing, 12))
+                        }
+                        Spacer()
+                    }
                 }
-                .allowsHitTesting(true)
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
-            .onChange(of: framebuffer.width) { _, _ in clampVirtualCursor() }
-            .onChange(of: framebuffer.height) { _, _ in clampVirtualCursor() }
-        }
-    }
-
-    /// Keeps the virtual cursor inside the live canvas after resizes.
-    private func clampVirtualCursor() {
-        virtualCursor.x = max(0, min(virtualCursor.x, CGFloat(max(framebuffer.width - 1, 0))))
-        virtualCursor.y = max(0, min(virtualCursor.y, CGFloat(max(framebuffer.height - 1, 0))))
-    }
-
-    private var magnificationGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { value in
-                zoomScale = max(0.5, min(lastZoomScale * value, 5.0))
+            .onAppear {
+                applyInitialPanIfNeeded(in: geometry.size)
             }
-            .onEnded { _ in
-                lastZoomScale = zoomScale
-            }
-    }
-
-    private func pointerGesture(in viewSize: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                handleDragChange(value, in: viewSize)
-            }
-            .onEnded { value in
-                handleDragEnd(value, in: viewSize)
-            }
-    }
-
-    private func handleDragChange(_ value: DragGesture.Value, in viewSize: CGSize) {
-        guard !isInputDisabled else { return }
-        if pointerMode == .directTouch {
-            let remote = convertToRemote(point: value.location, in: viewSize)
-            onPointerEvent(remote.x, remote.y, 0)
-        } else {
-            let geom = contentGeometry(in: viewSize)
-            let drawWidth = max(1.0, geom.size.width)
-            let scaleFactor = max(1.0, CGFloat(framebuffer.width) / drawWidth)
-
-            let deltaX = (value.translation.width - lastPanOffset.width) * scaleFactor
-            let deltaY = (value.translation.height - lastPanOffset.height) * scaleFactor
-
-            virtualCursor.x = max(0, min(virtualCursor.x + deltaX, CGFloat(framebuffer.width - 1)))
-            virtualCursor.y = max(0, min(virtualCursor.y + deltaY, CGFloat(framebuffer.height - 1)))
-            lastPanOffset = value.translation
-            onPointerEvent(Int(virtualCursor.x), Int(virtualCursor.y), 0)
-        }
-    }
-
-    private func handleDragEnd(_ value: DragGesture.Value, in viewSize: CGSize) {
-        guard !isInputDisabled else { return }
-        lastPanOffset = .zero
-        let distance = hypot(value.translation.width, value.translation.height)
-
-        if pointerMode == .directTouch {
-            let tapPoint = value.startLocation
-            let remote = convertToRemote(point: tapPoint, in: viewSize)
-            if distance < 8 {
-                // Direct touch tap: position cursor first, wait, down, wait, up
-                onPointerEvent(remote.x, remote.y, 0)
-                Task { @MainActor in
-                    do {
-                        try await Task.sleep(nanoseconds: 20_000_000)
-                    } catch {}
-                    onPointerEvent(remote.x, remote.y, 1)
-                    do {
-                        try await Task.sleep(nanoseconds: 50_000_000)
-                    } catch {}
-                    onPointerEvent(remote.x, remote.y, 0)
+            .onChange(of: framebuffer.hasReceivedFirstFrame) { _, received in
+                if received {
+                    applyInitialPanIfNeeded(in: geometry.size)
                 }
-            } else {
-                onPointerEvent(remote.x, remote.y, 0)
             }
-        } else {
-            let posX = Int(virtualCursor.x)
-            let posY = Int(virtualCursor.y)
-            if distance < 6 {
-                // Tap on virtual trackpad -> trigger left click
-                onPointerEvent(posX, posY, 0)
-                Task { @MainActor in
-                    do {
-                        try await Task.sleep(nanoseconds: 20_000_000)
-                    } catch {}
-                    onPointerEvent(posX, posY, 1)
-                    do {
-                        try await Task.sleep(nanoseconds: 50_000_000)
-                    } catch {}
-                    onPointerEvent(posX, posY, 0)
-                }
-            } else {
-                onPointerEvent(posX, posY, 0)
+            .onChange(of: framebuffer.width) { _, _ in
+                setActiveCursor(activeCursor)
+                panOffset = makeTransform(in: geometry.size).clampedPanOffset(panOffset)
+            }
+            .onChange(of: framebuffer.height) { _, _ in
+                setActiveCursor(activeCursor)
+                panOffset = makeTransform(in: geometry.size).clampedPanOffset(panOffset)
+            }
+            .onChange(of: displayPreference) { _, _ in
+                resetViewport(in: geometry.size, animated: true)
+            }
+            .onChange(of: resetTrigger) { _, _ in
+                resetViewport(in: geometry.size, animated: true)
+            }
+            .onChange(of: geometry.size) { _, newSize in
+                panOffset = makeTransform(in: newSize).clampedPanOffset(panOffset)
+            }
+            .onDisappear {
+                inertiaTask?.cancel()
+                inertiaTask = nil
             }
         }
     }
 
-    private func handleTwoFingerTap(at point: CGPoint, in viewSize: CGSize) {
+    // MARK: - Gesture Callbacks
+
+    private func makeCallbacks(in viewSize: CGSize) -> CanvasGestureCallbacks {
+        CanvasGestureCallbacks(
+            onPrimaryTap: { viewPoint, _ in
+                handlePrimaryTap(at: viewPoint, in: viewSize)
+            },
+            onRightClick: { viewPoint in
+                handleSecondaryTap(at: viewPoint, in: viewSize, button: .right)
+            },
+            onMiddleClick: { viewPoint in
+                handleSecondaryTap(at: viewPoint, in: viewSize, button: .middle)
+            },
+            onTrackpadMove: { translationDelta, velocity in
+                handleTrackpadMove(translationDelta: translationDelta, velocity: velocity, in: viewSize)
+            },
+            onTrackpadEnd: {
+                onFlushMoves?()
+            },
+            onDragStart: { viewPoint in
+                handleDragStart(at: viewPoint, in: viewSize)
+            },
+            onDragMove: { viewPoint, delta in
+                handleDragMove(to: viewPoint, delta: delta, in: viewSize)
+            },
+            onDragEnd: { viewPoint in
+                handleDragEnd(at: viewPoint, in: viewSize)
+            },
+            onViewportPanStart: {
+                inertiaTask?.cancel()
+                inertiaTask = nil
+            },
+            onViewportPan: { delta in
+                applyPan(delta: delta, in: viewSize)
+            },
+            onViewportPanEnd: { velocity in
+                startPanInertia(velocity: velocity, in: viewSize)
+            },
+            onPinchZoom: { scaleDelta, anchor, translationDelta in
+                applyFocalPinch(
+                    scaleDelta: scaleDelta,
+                    anchor: anchor,
+                    translationDelta: translationDelta,
+                    in: viewSize
+                )
+            },
+            onTwoFingerScroll: { delta, viewPoint in
+                handleScroll(delta: delta, at: viewPoint, in: viewSize)
+            },
+            onHoverMove: { viewPoint in
+                handleHoverMove(to: viewPoint, in: viewSize)
+            }
+        )
+    }
+
+    private func handlePrimaryTap(at viewPoint: CGPoint, in viewSize: CGSize) {
         guard !isInputDisabled else { return }
-        let (rx, ry): (Int, Int)
-        if pointerMode == .directTouch {
-            let remote = convertToRemote(point: point, in: viewSize)
-            rx = remote.x
-            ry = remote.y
-        } else {
-            rx = Int(virtualCursor.x)
-            ry = Int(virtualCursor.y)
+        isHoverPointerActive = false
+        let target = resolveTargetRemotePoint(viewPoint: viewPoint, in: viewSize)
+        setActiveCursor(CGPoint(x: target.x, y: target.y))
+        dispatchClick(posX: target.x, posY: target.y, buttonMask: RFBConstants.PointerButton.left.rawValue)
+    }
+
+    private func handleSecondaryTap(at viewPoint: CGPoint, in viewSize: CGSize, button: RFBConstants.PointerButton) {
+        guard !isInputDisabled else { return }
+        let target = resolveTargetRemotePoint(viewPoint: viewPoint, in: viewSize)
+        setActiveCursor(CGPoint(x: target.x, y: target.y))
+        dispatchClick(posX: target.x, posY: target.y, buttonMask: button.rawValue)
+    }
+
+    private func handleTrackpadMove(translationDelta: CGSize, velocity: CGPoint, in viewSize: CGSize) {
+        guard !isInputDisabled else { return }
+        isHoverPointerActive = false
+        let transform = makeTransform(in: viewSize)
+        let remoteDelta = transform.trackpadDelta(
+            translationDelta: translationDelta,
+            velocity: velocity,
+            sensitivity: settings.trackpadSensitivity
+        )
+        let next = clampRemotePoint(CGPoint(
+            x: activeCursor.x + remoteDelta.width,
+            y: activeCursor.y + remoteDelta.height
+        ))
+        setActiveCursor(next)
+
+        // Smoothly pan zoomed viewport when cursor approaches screen edges.
+        let viewCursor = transform.convertToView(remotePoint: next)
+        let autoPan = transform.edgeAutoPanDelta(cursorViewPoint: viewCursor, deltaTime: 1.0 / 60.0)
+        if autoPan != .zero {
+            let proposed = CGSize(width: panOffset.width + autoPan.width, height: panOffset.height + autoPan.height)
+            panOffset = transform.clampedPanOffset(proposed)
         }
-        // Send right click: move -> down with mask 4 (RFB button 3) -> wait -> up
-        onPointerEvent(rx, ry, 0)
-        Task { @MainActor in
-            do {
-                try await Task.sleep(nanoseconds: 20_000_000)
-            } catch {}
-            onPointerEvent(rx, ry, 4)
-            do {
-                try await Task.sleep(nanoseconds: 50_000_000)
-            } catch {}
-            onPointerEvent(rx, ry, 0)
+
+        let buttonMask: UInt8 = isLeftButtonHeld ? RFBConstants.PointerButton.left.rawValue : 0
+        dispatchMove(posX: Int(next.x), posY: Int(next.y), buttonMask: buttonMask)
+    }
+
+    private func handleDragStart(at viewPoint: CGPoint, in viewSize: CGSize) {
+        guard !isInputDisabled else { return }
+        isHoverPointerActive = false
+        isLeftButtonHeld = true
+        let target = resolveTargetRemotePoint(viewPoint: viewPoint, in: viewSize)
+        setActiveCursor(CGPoint(x: target.x, y: target.y))
+        if pointerMode == .directTouch {
+            directTouchDragPoint = viewPoint
+        }
+        let leftMask = RFBConstants.PointerButton.left.rawValue
+        if let onInputCommand {
+            onInputCommand(.pointerDown(posX: target.x, posY: target.y, buttonMask: leftMask))
+        } else {
+            onPointerEvent(target.x, target.y, 0)
+            onPointerEvent(target.x, target.y, leftMask)
         }
     }
+
+    private func handleDragMove(to viewPoint: CGPoint, delta: CGSize, in viewSize: CGSize) {
+        guard !isInputDisabled else { return }
+        let transform = makeTransform(in: viewSize)
+        let nextPoint: CGPoint
+        if pointerMode == .directTouch {
+            let remote = transform.convertToRemote(viewPoint: viewPoint)
+            nextPoint = CGPoint(x: remote.x, y: remote.y)
+            directTouchDragPoint = viewPoint
+        } else {
+            let remoteDelta = transform.trackpadDelta(
+                translationDelta: delta,
+                velocity: .zero,
+                sensitivity: settings.trackpadSensitivity
+            )
+            nextPoint = clampRemotePoint(CGPoint(
+                x: activeCursor.x + remoteDelta.width,
+                y: activeCursor.y + remoteDelta.height
+            ))
+            let viewCursor = transform.convertToView(remotePoint: nextPoint)
+            let autoPan = transform.edgeAutoPanDelta(cursorViewPoint: viewCursor, deltaTime: 1.0 / 60.0)
+            if autoPan != .zero {
+                let proposed = CGSize(width: panOffset.width + autoPan.width, height: panOffset.height + autoPan.height)
+                panOffset = transform.clampedPanOffset(proposed)
+            }
+        }
+        setActiveCursor(nextPoint)
+        dispatchMove(
+            posX: Int(nextPoint.x),
+            posY: Int(nextPoint.y),
+            buttonMask: RFBConstants.PointerButton.left.rawValue
+        )
+    }
+
+    private func handleDragEnd(at viewPoint: CGPoint, in viewSize: CGSize) {
+        isLeftButtonHeld = false
+        directTouchDragPoint = nil
+        // Release dispatches unconditionally: the view-only gates in enqueueInput and
+        // sendPointerEvent block presses, and skipping here would latch the remote
+        // left button when input is disabled mid-drag.
+        let target: (x: Int, y: Int)
+        if pointerMode == .directTouch {
+            target = makeTransform(in: viewSize).convertToRemote(viewPoint: viewPoint)
+            setActiveCursor(CGPoint(x: target.x, y: target.y))
+        } else {
+            target = (Int(activeCursor.x), Int(activeCursor.y))
+        }
+        if let onInputCommand {
+            onInputCommand(.pointerUp(posX: target.x, posY: target.y))
+        } else {
+            onPointerEvent(target.x, target.y, 0)
+        }
+    }
+
+    private func handleScroll(delta: CGSize, at viewPoint: CGPoint, in viewSize: CGSize) {
+        guard !isInputDisabled else { return }
+        let steps = scrollAccumulator.consume(
+            deltaX: delta.width,
+            deltaY: delta.height,
+            naturalScrolling: settings.naturalScrolling
+        )
+        guard steps.stepsX != 0 || steps.stepsY != 0 else { return }
+
+        let target = resolveTargetRemotePoint(viewPoint: viewPoint, in: viewSize)
+        let activeButtons: UInt8 = isLeftButtonHeld ? RFBConstants.PointerButton.left.rawValue : 0
+        if let onInputCommand {
+            onInputCommand(.scroll(
+                posX: target.x,
+                posY: target.y,
+                stepsX: steps.stepsX,
+                stepsY: steps.stepsY,
+                activeButtons: activeButtons
+            ))
+        } else {
+            emitFallbackScroll(posX: target.x, posY: target.y, stepsX: steps.stepsX, stepsY: steps.stepsY)
+        }
+    }
+
+    private func handleHoverMove(to viewPoint: CGPoint, in viewSize: CGSize) {
+        guard !isInputDisabled else { return }
+        isHoverPointerActive = true
+        let remote = makeTransform(in: viewSize).convertToRemote(viewPoint: viewPoint)
+        setActiveCursor(CGPoint(x: remote.x, y: remote.y))
+        let buttonMask: UInt8 = isLeftButtonHeld ? RFBConstants.PointerButton.left.rawValue : 0
+        dispatchMove(posX: remote.x, posY: remote.y, buttonMask: buttonMask)
+    }
+
+    // MARK: - Pan & Zoom Helpers
+
+    private func applyPan(delta: CGSize, in viewSize: CGSize) {
+        let sign: CGFloat = settings.invertPanDirection ? -1.0 : 1.0
+        let proposed = CGSize(
+            width: panOffset.width + delta.width * sign,
+            height: panOffset.height + delta.height * sign
+        )
+        panOffset = makeTransform(in: viewSize).clampedPanOffset(proposed)
+    }
+
+    private func startPanInertia(velocity: CGPoint, in viewSize: CGSize) {
+        let transform = makeTransform(in: viewSize)
+        guard transform.canPan else { return }
+        let sign: CGFloat = settings.invertPanDirection ? -1.0 : 1.0
+        var vx = velocity.x * sign
+        var vy = velocity.y * sign
+        guard hypot(vx, vy) > 90 else { return }
+
+        inertiaTask?.cancel()
+        inertiaTask = Task {
+            let clock = ContinuousClock()
+            var last = clock.now
+            while !Task.isCancelled, hypot(vx, vy) > 14 {
+                do {
+                    try await Task.sleep(for: .milliseconds(16))
+                } catch is CancellationError {
+                    break
+                } catch {
+                    logger.debug("Pan inertia stopped: \(error.localizedDescription)")
+                    break
+                }
+                let now = clock.now
+                let elapsed = last.duration(to: now)
+                let dt = CGFloat(elapsed.components.seconds) + CGFloat(elapsed.components.attoseconds) / 1e18
+                last = now
+                let clampedDt = min(max(dt, 0.004), 0.05)
+
+                let currentTransform = makeTransform(in: viewSize)
+                let nextOffset = CGSize(
+                    width: panOffset.width + vx * clampedDt,
+                    height: panOffset.height + vy * clampedDt
+                )
+                let clamped = currentTransform.clampedPanOffset(nextOffset)
+                if clamped.width == panOffset.width {
+                    vx = 0
+                }
+                if clamped.height == panOffset.height {
+                    vy = 0
+                }
+                panOffset = clamped
+
+                let damping = pow(0.92, clampedDt * 60.0)
+                vx *= damping
+                vy *= damping
+            }
+        }
+    }
+
+    private func applyFocalPinch(
+        scaleDelta: CGFloat,
+        anchor: CGPoint,
+        translationDelta: CGSize,
+        in viewSize: CGSize
+    ) {
+        let transform = makeTransform(in: viewSize)
+        let result = transform.focalZoomUpdate(
+            scaleDelta: scaleDelta,
+            anchor: anchor,
+            translationDelta: translationDelta
+        )
+        zoomScale = result.zoomScale
+        panOffset = result.panOffset
+    }
+
+    private func resetViewport(in viewSize: CGSize, animated: Bool) {
+        inertiaTask?.cancel()
+        inertiaTask = nil
+        let targetTransform = ViewportTransform(
+            framebufferWidth: framebuffer.width,
+            framebufferHeight: framebuffer.height,
+            viewSize: viewSize,
+            displayPreference: displayPreference,
+            zoomScale: 1.0,
+            panOffset: .zero,
+            panInsets: panInsets
+        )
+        let initialPan: CGSize = if displayPreference == .fit {
+            .zero
+        } else {
+            targetTransform.initialPanOffset(focusedOn: didApplyInitialPan ? activeCursor : nil)
+        }
+        if animated {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                zoomScale = 1.0
+                panOffset = initialPan
+            }
+        } else {
+            zoomScale = 1.0
+            panOffset = initialPan
+        }
+    }
+
+    private func applyInitialPanIfNeeded(in viewSize: CGSize) {
+        guard !didApplyInitialPan, viewSize.width > 0, viewSize.height > 0 else { return }
+        if framebuffer.hasReceivedFirstFrame {
+            didApplyInitialPan = true
+        }
+        if displayPreference != .fit {
+            let transform = ViewportTransform(
+                framebufferWidth: framebuffer.width,
+                framebufferHeight: framebuffer.height,
+                viewSize: viewSize,
+                displayPreference: displayPreference,
+                zoomScale: 1.0,
+                panOffset: .zero,
+                panInsets: panInsets
+            )
+            panOffset = transform.initialPanOffset(focusedOn: nil)
+        }
+    }
+
+    private func shouldShowZoomBadge(in viewSize: CGSize) -> Bool {
+        guard framebuffer.hasReceivedFirstFrame else { return false }
+        if abs(zoomScale - 1.0) > 0.03 {
+            return true
+        }
+        if displayPreference == .fit, hypot(panOffset.width, panOffset.height) > 2 {
+            return true
+        }
+        return displayPreference != .fit && makeTransform(in: viewSize).canPan && abs(zoomScale - 1.0) > 0.03
+    }
+
+    private func effectiveZoomLabel(in viewSize: CGSize) -> String {
+        let base = makeTransform(in: viewSize).transformedContentRect.width
+        let fitWidth = ViewportTransform(
+            framebufferWidth: framebuffer.width,
+            framebufferHeight: framebuffer.height,
+            viewSize: viewSize,
+            displayPreference: .fit
+        ).baseContentRect.width
+        let relative = fitWidth > 0 ? base / fitWidth : zoomScale
+        return String(format: "%.1f×", relative)
+    }
+
+    // MARK: - Dispatch Helpers
+
+    private func resolveTargetRemotePoint(viewPoint: CGPoint, in viewSize: CGSize) -> (x: Int, y: Int) {
+        if pointerMode == .directTouch || isHoverPointerActive {
+            return makeTransform(in: viewSize).convertToRemote(viewPoint: viewPoint)
+        }
+        return (Int(activeCursor.x), Int(activeCursor.y))
+    }
+
+    private func dispatchMove(posX: Int, posY: Int, buttonMask: UInt8) {
+        if let onInputCommand {
+            onInputCommand(.pointerMove(posX: posX, posY: posY, buttonMask: buttonMask))
+        } else {
+            onPointerEvent(posX, posY, buttonMask)
+        }
+    }
+
+    private func dispatchClick(posX: Int, posY: Int, buttonMask: UInt8) {
+        if let onInputCommand {
+            onInputCommand(.click(posX: posX, posY: posY, buttonMask: buttonMask))
+        } else {
+            onPointerEvent(posX, posY, 0)
+            onPointerEvent(posX, posY, buttonMask)
+            onPointerEvent(posX, posY, 0)
+        }
+    }
+
+    private func emitFallbackScroll(posX: Int, posY: Int, stepsX: Int, stepsY: Int) {
+        let vButton = stepsY > 0 ? RFBConstants.PointerButton.scrollUp.rawValue : RFBConstants.PointerButton.scrollDown.rawValue
+        for _ in 0 ..< min(abs(stepsY), 6) {
+            onPointerEvent(posX, posY, vButton)
+            onPointerEvent(posX, posY, 0)
+        }
+        let hButton = stepsX > 0 ? RFBConstants.PointerButton.scrollLeft.rawValue : RFBConstants.PointerButton.scrollRight.rawValue
+        for _ in 0 ..< min(abs(stepsX), 6) {
+            onPointerEvent(posX, posY, hButton)
+            onPointerEvent(posX, posY, 0)
+        }
+    }
+
+    private func clampRemotePoint(_ point: CGPoint) -> CGPoint {
+        let maxX = CGFloat(max(framebuffer.width - 1, 0))
+        let maxY = CGFloat(max(framebuffer.height - 1, 0))
+        return CGPoint(
+            x: max(0, min(point.x, maxX)),
+            y: max(0, min(point.y, maxY))
+        )
+    }
+
+    private func makeTransform(in viewSize: CGSize) -> ViewportTransform {
+        ViewportTransform(
+            framebufferWidth: framebuffer.width,
+            framebufferHeight: framebuffer.height,
+            viewSize: viewSize,
+            displayPreference: displayPreference,
+            zoomScale: zoomScale,
+            panOffset: panOffset,
+            panInsets: panInsets
+        )
+    }
+
+    // MARK: - Public Coordinate API (Tested Directly)
 
     /// Computes the exact frame geometry and draw scale for current display preference.
     public func contentGeometry(in viewSize: CGSize) -> (origin: CGPoint, size: CGSize) {
-        guard framebuffer.width > 0, framebuffer.height > 0, viewSize.width > 0, viewSize.height > 0 else {
-            return (.zero, .zero)
-        }
-        let fbW = CGFloat(framebuffer.width)
-        let fbH = CGFloat(framebuffer.height)
-        let frameAspect = fbW / fbH
-        let viewAspect = viewSize.width / viewSize.height
-
-        var drawWidth: CGFloat
-        var drawHeight: CGFloat
-
-        switch displayPreference {
-        case .fit:
-            if frameAspect > viewAspect {
-                drawWidth = viewSize.width
-                drawHeight = viewSize.width / frameAspect
-            } else {
-                drawWidth = viewSize.height * frameAspect
-                drawHeight = viewSize.height
-            }
-        case .fill:
-            if frameAspect > viewAspect {
-                drawWidth = viewSize.height * frameAspect
-                drawHeight = viewSize.height
-            } else {
-                drawWidth = viewSize.width
-                drawHeight = viewSize.width / frameAspect
-            }
-        case .actualSize:
-            drawWidth = fbW
-            drawHeight = fbH
-        }
-
-        let originX = (viewSize.width - drawWidth) / 2.0
-        let originY = (viewSize.height - drawHeight) / 2.0
-        return (CGPoint(x: originX, y: originY), CGSize(width: drawWidth, height: drawHeight))
+        let rect = makeTransform(in: viewSize).transformedContentRect
+        return (rect.origin, rect.size)
     }
 
     /// Converts remote macOS framebuffer pixel coordinates to SwiftUI view space.
     public func convertToView(remotePoint: CGPoint, in viewSize: CGSize) -> CGPoint {
-        let geom = contentGeometry(in: viewSize)
-        guard framebuffer.width > 0, framebuffer.height > 0, geom.size.width > 0, geom.size.height > 0 else {
-            return .zero
-        }
-        let viewX = geom.origin.x + (remotePoint.x / CGFloat(framebuffer.width)) * geom.size.width
-        let viewY = geom.origin.y + (remotePoint.y / CGFloat(framebuffer.height)) * geom.size.height
-        return CGPoint(x: viewX, y: viewY)
+        makeTransform(in: viewSize).convertToView(remotePoint: remotePoint)
     }
 
     /// Normalizes SwiftUI view coordinates to remote macOS framebuffer pixel space.
     public func convertToRemote(point: CGPoint, in viewSize: CGSize) -> (x: Int, y: Int) {
-        let geom = contentGeometry(in: viewSize)
-        guard framebuffer.width > 0, framebuffer.height > 0, geom.size.width > 0, geom.size.height > 0 else {
-            return (0, 0)
-        }
-        let relativeX = (point.x - geom.origin.x) / geom.size.width
-        let relativeY = (point.y - geom.origin.y) / geom.size.height
-
-        let remoteX = Int(max(0.0, min(relativeX * CGFloat(framebuffer.width), CGFloat(framebuffer.width - 1))))
-        let remoteY = Int(max(0.0, min(relativeY * CGFloat(framebuffer.height), CGFloat(framebuffer.height - 1))))
-        return (remoteX, remoteY)
+        makeTransform(in: viewSize).convertToRemote(viewPoint: point)
     }
 }

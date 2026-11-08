@@ -9,31 +9,55 @@ public final class KeychainManager: Sendable {
     public init() {}
 
     /// Device-only credentials stay off iCloud; sync needs explicit opt-in consent.
+    /// Update-first so a failed write never destroys the stored credential.
     public func savePassword(_ password: String, for profileId: UUID) throws {
         guard let data = password.data(using: .utf8) else { return }
         let account = profileId.uuidString
 
-        let deleteQuery: [String: Any] = [
+        let searchQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            // Legacy items may exist in either synchronizability class.
             kSecAttrSynchronizable as String: kSecAttrSynchronizableAny
         ]
-        SecItemDelete(deleteQuery as CFDictionary)
-
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-            kSecAttrSynchronizable as String: kCFBooleanFalse as Any
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: data
         ]
 
-        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        var status = SecItemUpdate(searchQuery as CFDictionary, updateAttributes as CFDictionary)
+        if status == errSecItemNotFound {
+            let addQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+                kSecAttrSynchronizable as String: kCFBooleanFalse as Any
+            ]
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+            if status == errSecDuplicateItem {
+                // Concurrent writer created the item between update and add.
+                status = SecItemUpdate(searchQuery as CFDictionary, updateAttributes as CFDictionary)
+            }
+        }
         guard status == errSecSuccess else {
             throw KeychainError.status(status)
         }
+    }
+
+    /// Existence probe so editors can hint "saved password" without loading
+    /// the secret into memory.
+    public func hasPassword(for profileId: UUID) -> Bool {
+        let account = profileId.uuidString
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny
+        ]
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
     }
 
     public func getPassword(for profileId: UUID) -> String? {

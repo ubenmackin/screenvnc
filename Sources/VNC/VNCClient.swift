@@ -16,7 +16,24 @@ public protocol VNCClientDelegate: AnyObject, Sendable {
     func vncClient(_ client: VNCClient, didResizeDesktopWidth width: Int, height: Int)
     func vncClient(_ client: VNCClient, didReceiveRawRect rect: DecodedRect)
     func vncClient(_ client: VNCClient, didReceiveCopyRect dest: DecodedRect, srcX: Int, srcY: Int)
+    func vncClient(_ client: VNCClient, didReceiveUpdateBatch ops: [FramebufferUpdateOp])
+    func vncClient(_ client: VNCClient, didUpdateCursor cursor: DecodedCursor?)
     func vncClient(_ client: VNCClient, didReceiveCutText text: String)
+}
+
+public extension VNCClientDelegate {
+    func vncClient(_ client: VNCClient, didReceiveUpdateBatch ops: [FramebufferUpdateOp]) {
+        for op in ops {
+            switch op {
+            case let .raw(rect):
+                vncClient(client, didReceiveRawRect: rect)
+            case let .copy(dest, srcX, srcY):
+                vncClient(client, didReceiveCopyRect: dest, srcX: srcX, srcY: srcY)
+            }
+        }
+    }
+
+    func vncClient(_: VNCClient, didUpdateCursor _: DecodedCursor?) {}
 }
 
 public actor VNCClient {
@@ -39,9 +56,37 @@ public actor VNCClient {
         self.delegate = delegate
     }
 
-    /// Updates view-only mode; when true, pointer and key sends are dropped.
+    /// Updates view-only mode; when true, presses and key sends drop while releases pass.
     public func setViewOnly(_ value: Bool) {
         isViewOnly = value
+    }
+
+    /// Ceiling for server-supplied failure text admitted into display or logs.
+    static let maxWireReasonLength = 256
+
+    /// Bounds server-supplied failure text and keeps only single-scalar printable
+    /// ASCII, so hostile control bytes or oversized payloads never reach UI or logs.
+    static func sanitizedWireReason(from data: Data) -> String {
+        // Failable decode drops invalid UTF-8 entirely rather than lossy-substituting;
+        // hostile binary payloads fail closed to the fallback reason.
+        guard let bounded = String(data: data.prefix(maxWireReasonLength), encoding: .utf8) else {
+            return "Unreadable server failure reason."
+        }
+        let printable = bounded.filter { character in
+            guard let scalar = character.unicodeScalars.first, character.unicodeScalars.count == 1 else { return false }
+            return (0x20 ... 0x7E).contains(scalar.value)
+        }
+        return printable.isEmpty ? "Unreadable server failure reason." : printable
+    }
+
+    /// Applies the wire-reason bound to any error body before it enters user-visible state.
+    static func sanitizedFailureMessage(for error: Error) -> String {
+        guard let authError = error as? VNCAuthError,
+              case let .authenticationRejected(reason) = authError
+        else {
+            return error.localizedDescription
+        }
+        return sanitizedWireReason(from: Data(reason.utf8))
     }
 
     /// Connects to a remote host and executes the RFB protocol handshake.
@@ -101,7 +146,11 @@ public actor VNCClient {
 
     /// Sends mouse pointer coordinates and button state (RFC 6143 Section 7.5.5).
     public func sendPointerEvent(posX: Int, posY: Int, buttonMask: UInt8) {
-        guard !isViewOnly, state == .connected, let connection else { return }
+        // View-only drops presses but passes releases so a mid-drag toggle cannot latch buttons.
+        if buttonMask != 0 {
+            guard !isViewOnly else { return }
+        }
+        guard state == .connected, let connection else { return }
         // Clamp to desktop bounds; prevents negative wrap through UInt8 truncation.
         let clampedX = min(max(posX, 0), max(desktopWidth - 1, 0))
         let clampedY = min(max(posY, 0), max(desktopHeight - 1, 0))
@@ -118,6 +167,63 @@ public actor VNCClient {
         if buttonMask != 0 {
             requestFramebufferUpdate(incremental: true)
         }
+    }
+
+    /// Emits vertical (4/5) and horizontal (6/7) scroll wheel pulses (positive = up/left).
+    public func sendScrollEvent(
+        posX: Int,
+        posY: Int,
+        deltaStepsX: Int,
+        deltaStepsY: Int,
+        activeButtons: UInt8 = 0
+    ) {
+        guard !isViewOnly, state == .connected, let connection else { return }
+        let clampedX = min(max(posX, 0), max(desktopWidth - 1, 0))
+        let clampedY = min(max(posY, 0), max(desktopHeight - 1, 0))
+        let clampedStepsY = min(max(deltaStepsY, -12), 12)
+        let clampedStepsX = min(max(deltaStepsX, -12), 12)
+        guard clampedStepsX != 0 || clampedStepsY != 0 else { return }
+
+        let highX = UInt8((clampedX >> 8) & 0xFF)
+        let lowX = UInt8(clampedX & 0xFF)
+        let highY = UInt8((clampedY >> 8) & 0xFF)
+        let lowY = UInt8(clampedY & 0xFF)
+
+        var packets = Data()
+        let verticalButton: UInt8 = clampedStepsY > 0
+            ? RFBConstants.PointerButton.scrollUp.rawValue
+            : RFBConstants.PointerButton.scrollDown.rawValue
+        for _ in 0 ..< abs(clampedStepsY) {
+            packets.append(contentsOf: [
+                RFBConstants.ClientMessage.pointerEvent.rawValue,
+                activeButtons | verticalButton,
+                highX, lowX, highY, lowY
+            ])
+            packets.append(contentsOf: [
+                RFBConstants.ClientMessage.pointerEvent.rawValue,
+                activeButtons,
+                highX, lowX, highY, lowY
+            ])
+        }
+
+        let horizontalButton: UInt8 = clampedStepsX > 0
+            ? RFBConstants.PointerButton.scrollLeft.rawValue
+            : RFBConstants.PointerButton.scrollRight.rawValue
+        for _ in 0 ..< abs(clampedStepsX) {
+            packets.append(contentsOf: [
+                RFBConstants.ClientMessage.pointerEvent.rawValue,
+                activeButtons | horizontalButton,
+                highX, lowX, highY, lowY
+            ])
+            packets.append(contentsOf: [
+                RFBConstants.ClientMessage.pointerEvent.rawValue,
+                activeButtons,
+                highX, lowX, highY, lowY
+            ])
+        }
+
+        connection.send(content: packets, completion: .contentProcessed { _ in })
+        requestFramebufferUpdate(incremental: true)
     }
 
     /// Sends keyboard key press or release event (RFC 6143 Section 7.5.4).
@@ -218,11 +324,20 @@ public actor VNCClient {
                         }
                     }
                 case .setColourMapEntries:
-                    break
+                    // Consume the full payload so the stream never desyncs; truecolor
+                    // sessions never use colour maps, but bytes must still be read.
+                    let colourHeader = try await readExact(5)
+                    let entryCount = Int((UInt16(colourHeader[3]) << 8) | UInt16(colourHeader[4]))
+                    // Bound before skipping; classic maps hold 256 entries, more is hostile.
+                    guard entryCount <= 256 else {
+                        throw VNCAuthError.authenticationRejected("Colour map entry count out of range.")
+                    }
+                    _ = try await readExact(entryCount * 6)
                 }
             } catch {
                 if isRunning {
-                    await updateState(.failed(error.localizedDescription))
+                    // Sanitize before both display and state; error bodies stay private in logs.
+                    await updateState(.failed(VNCClient.sanitizedFailureMessage(for: error)))
                 }
                 break
             }
@@ -245,6 +360,9 @@ public actor VNCClient {
             throw VNCAuthError.authenticationRejected("Framebuffer update has too many rects: \(numRects).")
         }
 
+        var pendingBatch: [FramebufferUpdateOp] = []
+        pendingBatch.reserveCapacity(min(numRects, 64))
+
         for _ in 0 ..< numRects {
             let rectHeader = try await readExact(12)
             // readExact guarantees length; desync fails closed instead of skipping.
@@ -260,8 +378,14 @@ public actor VNCClient {
                 (UInt32(rectBytes[10]) << 8) | UInt32(rectBytes[11])
             let encTypeRaw = Int32(bitPattern: encWord)
 
-            // LastRect carries no payload; it only terminates the batch.
+            // LastRect terminates the current FramebufferUpdate batch per RFC 6143.
             if encTypeRaw == RFBConstants.Encoding.lastRect.rawValue {
+                break
+            }
+
+            // Cursor pseudo-encoding allows 0x0 dimensions to represent a hidden cursor.
+            if encTypeRaw == RFBConstants.Encoding.cursor.rawValue {
+                try await handleCursorRect(hotspotX: rectX, hotspotY: rectY, width: rectWidth, height: rectHeight)
                 continue
             }
 
@@ -270,38 +394,14 @@ public actor VNCClient {
                 throw VNCAuthError.authenticationRejected("Framebuffer rect out of range.")
             }
             if encTypeRaw == RFBConstants.Encoding.desktopSize.rawValue {
-                desktopWidth = rectWidth
-                desktopHeight = rectHeight
-                let capturedDelegate = delegate
-                let capturedSelf = self
-                // Hop resize to MainActor; session state stays actor-isolated.
-                await MainActor.run {
-                    capturedDelegate?.vncClient(capturedSelf, didResizeDesktopWidth: rectWidth, height: rectHeight)
-                }
+                await flushUpdateBatch(&pendingBatch)
+                await handleDesktopResizeRect(width: rectWidth, height: rectHeight)
                 continue
             }
 
             if encTypeRaw == RFBConstants.Encoding.copyRect.rawValue {
-                let copyData = try await readExact(4)
-                if let (srcX, srcY) = RFBEncodings.decodeCopyRect(
-                    data: copyData,
-                    destX: rectX,
-                    destY: rectY,
-                    width: rectWidth,
-                    height: rectHeight
-                ) {
-                    let destRect = DecodedRect(
-                        originX: rectX,
-                        originY: rectY,
-                        width: rectWidth,
-                        height: rectHeight
-                    )
-                    let capturedDelegate = delegate
-                    let capturedSelf = self
-                    // Hop blit to MainActor; session state stays actor-isolated.
-                    await MainActor.run {
-                        capturedDelegate?.vncClient(capturedSelf, didReceiveCopyRect: destRect, srcX: srcX, srcY: srcY)
-                    }
+                if let op = try await readCopyRectOp(rectX: rectX, rectY: rectY, width: rectWidth, height: rectHeight) {
+                    await appendUpdateOp(op, to: &pendingBatch)
                 }
                 continue
             }
@@ -310,25 +410,91 @@ public actor VNCClient {
             guard encTypeRaw == RFBConstants.Encoding.raw.rawValue else {
                 throw VNCAuthError.authenticationRejected("Unsupported encoding.")
             }
-            let pixelBytes = rectWidth * rectHeight * 4
-            // Cap Raw payload by desktop area and absolute ceiling.
-            guard pixelBytes <= 33_554_432, pixelBytes <= desktopWidth * desktopHeight * 4 else {
-                throw VNCAuthError.authenticationRejected("Framebuffer rect payload too large.")
-            }
-            let data = try await readExact(pixelBytes)
-            let rect = RFBEncodings.decodeRaw(
-                data: data,
-                originX: rectX,
-                originY: rectY,
-                width: rectWidth,
-                height: rectHeight
+            let rawOp = try await readRawRectOp(rectX: rectX, rectY: rectY, width: rectWidth, height: rectHeight)
+            await appendUpdateOp(rawOp, to: &pendingBatch)
+        }
+
+        await flushUpdateBatch(&pendingBatch)
+    }
+
+    private func handleCursorRect(hotspotX: Int, hotspotY: Int, width: Int, height: Int) async throws {
+        guard width >= 0, height >= 0, width <= 512, height <= 512 else {
+            throw VNCAuthError.authenticationRejected("Cursor rect out of range.")
+        }
+        let decodedCursor: DecodedCursor?
+        if width == 0 || height == 0 {
+            decodedCursor = nil
+        } else {
+            let pixelBytes = width * height * 4
+            let maskBytes = ((width + 7) / 8) * height
+            let cursorData = try await readExact(pixelBytes + maskBytes)
+            decodedCursor = RFBEncodings.decodeCursor(
+                data: cursorData,
+                cursorX: hotspotX,
+                cursorY: hotspotY,
+                width: width,
+                height: height
             )
-            let capturedDelegate = delegate
-            let capturedSelf = self
-            // Hop pixels to MainActor; session state stays actor-isolated.
-            await MainActor.run {
-                capturedDelegate?.vncClient(capturedSelf, didReceiveRawRect: rect)
-            }
+        }
+        let capturedDelegate = delegate
+        let capturedSelf = self
+        await MainActor.run {
+            capturedDelegate?.vncClient(capturedSelf, didUpdateCursor: decodedCursor)
+        }
+    }
+
+    private func handleDesktopResizeRect(width: Int, height: Int) async {
+        desktopWidth = width
+        desktopHeight = height
+        let capturedDelegate = delegate
+        let capturedSelf = self
+        // Hop resize to MainActor; session state stays actor-isolated.
+        await MainActor.run {
+            capturedDelegate?.vncClient(capturedSelf, didResizeDesktopWidth: width, height: height)
+        }
+    }
+
+    private func readCopyRectOp(rectX: Int, rectY: Int, width: Int, height: Int) async throws -> FramebufferUpdateOp? {
+        let copyData = try await readExact(4)
+        guard let (srcX, srcY) = RFBEncodings.decodeCopyRect(
+            data: copyData,
+            destX: rectX,
+            destY: rectY,
+            width: width,
+            height: height
+        ) else {
+            return nil
+        }
+        let destRect = DecodedRect(originX: rectX, originY: rectY, width: width, height: height)
+        return .copy(dest: destRect, srcX: srcX, srcY: srcY)
+    }
+
+    private func readRawRectOp(rectX: Int, rectY: Int, width: Int, height: Int) async throws -> FramebufferUpdateOp {
+        let pixelBytes = width * height * 4
+        // Cap Raw payload by desktop area and absolute ceiling.
+        guard pixelBytes <= 33_554_432, pixelBytes <= desktopWidth * desktopHeight * 4 else {
+            throw VNCAuthError.authenticationRejected("Framebuffer rect payload too large.")
+        }
+        let data = try await readExact(pixelBytes)
+        let rect = RFBEncodings.decodeRaw(data: data, originX: rectX, originY: rectY, width: width, height: height)
+        return .raw(rect)
+    }
+
+    private func appendUpdateOp(_ op: FramebufferUpdateOp, to batch: inout [FramebufferUpdateOp]) async {
+        batch.append(op)
+        if batch.count >= 64 {
+            await flushUpdateBatch(&batch)
+        }
+    }
+
+    private func flushUpdateBatch(_ batch: inout [FramebufferUpdateOp]) async {
+        guard !batch.isEmpty else { return }
+        let ops = batch
+        batch.removeAll(keepingCapacity: true)
+        let capturedDelegate = delegate
+        let capturedSelf = self
+        await MainActor.run {
+            capturedDelegate?.vncClient(capturedSelf, didReceiveUpdateBatch: ops)
         }
     }
 

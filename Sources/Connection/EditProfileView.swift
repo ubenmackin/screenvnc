@@ -1,11 +1,19 @@
 // Connection — Form view for creating and modifying host connection profiles.
 import SwiftUI
 
+/// Distinguishes untouched credentials from intentionally cleared ones so the
+/// save path only touches the Keychain when the user actually edited the field.
+public enum PasswordEdit: Sendable, Equatable {
+    case unchanged
+    case update(String)
+    case clear
+}
+
 public struct EditProfileView: View {
     @Environment(\.dismiss) private var dismiss
     public var profileToEdit: ConnectionProfile?
     public var deviceMode: DeviceMode
-    public var onSave: @MainActor (ConnectionProfile, String?) -> Void
+    public var onSave: @MainActor (ConnectionProfile, PasswordEdit) -> Void
 
     @State private var name: String = ""
     @State private var host: String = ""
@@ -13,6 +21,8 @@ public struct EditProfileView: View {
     @State private var authMethod: AuthMethod = .vncDES
     @State private var username: String = ""
     @State private var password: String = ""
+    @State private var hasEditedPassword = false
+    @State private var hasSavedPassword = false
     @State private var displayPreference: DisplayPreference = .fit
     @State private var qualityPreference: QualityPreference = .adaptive
     @State private var pointerMode: PointerMode = .directTouch
@@ -23,7 +33,7 @@ public struct EditProfileView: View {
     public init(
         profileToEdit: ConnectionProfile? = nil,
         deviceMode: DeviceMode = .mode1NormalPhone,
-        onSave: @escaping @MainActor (ConnectionProfile, String?) -> Void
+        onSave: @escaping @MainActor (ConnectionProfile, PasswordEdit) -> Void
     ) {
         self.profileToEdit = profileToEdit
         self.deviceMode = deviceMode
@@ -56,7 +66,13 @@ public struct EditProfileView: View {
                     }
 
                     if authMethod != .none {
-                        SecureField("Password", text: $password)
+                        SecureField(
+                            hasSavedPassword && !hasEditedPassword ? "Saved password (leave blank to keep)" : "Password",
+                            text: $password
+                        )
+                        .onChange(of: password) {
+                            hasEditedPassword = true
+                        }
                     }
                 }
 
@@ -143,7 +159,9 @@ public struct EditProfileView: View {
             pointerMode = existingProfile.pointerMode ?? SettingsStore.shared.defaultPointerMode
             isFavorite = existingProfile.isFavorite
             requiresBiometrics = existingProfile.requiresBiometrics
-            password = KeychainManager.shared.getPassword(for: existingProfile.id) ?? ""
+            // Presence-only probe; the secret itself stays in the Keychain until
+            // the user opts to replace it. Blank field plus placeholder hides that.
+            hasSavedPassword = KeychainManager.shared.hasPassword(for: existingProfile.id)
         } else {
             let settings = SettingsStore.shared
             displayPreference = settings.defaultDisplayPreference
@@ -181,7 +199,16 @@ public struct EditProfileView: View {
         do {
             try profile.validate()
             // Passwords may contain leading/trailing spaces; pass through untrimmed.
-            onSave(profile, password.isEmpty ? nil : password)
+            // Untouched fields report .unchanged so the stored credential is never
+            // round-tripped through view state; an emptied field reports .clear.
+            let edit: PasswordEdit = if !hasEditedPassword {
+                .unchanged
+            } else if password.isEmpty {
+                .clear
+            } else {
+                .update(password)
+            }
+            onSave(profile, edit)
             dismiss()
         } catch {
             validationError = error.localizedDescription

@@ -22,7 +22,7 @@ public final class ProfileStore {
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         } catch {
-            logger.error("Failed to create profile directory: \(error.localizedDescription)")
+            logger.error("Failed to create profile directory: \(error.localizedDescription, privacy: .private)")
         }
         fileURL = folder.appendingPathComponent("profiles.json")
 
@@ -70,14 +70,18 @@ public final class ProfileStore {
             let valid = validated(decoded)
             return valid.isEmpty ? nil : valid
         } catch {
-            logger.warning("Failed to decode iCloud KVS profiles payload: \(error.localizedDescription)")
+            logger.warning("Failed to decode iCloud KVS profiles payload: \(error.localizedDescription, privacy: .private)")
             return nil
         }
     }
 
-    /// Restores the provided profiles from iCloud, writes to local disk and confirms sync.
+    /// Restores consent-confirmed cloud profiles; Keychain entries for restored IDs
+    /// are dropped so a restored host can never inherit a locally stored password.
     public func restoreFromCloud(_ cloudProfiles: [ConnectionProfile]) {
         let valid = validated(cloudProfiles)
+        for profile in valid where KeychainManager.shared.hasPassword(for: profile.id) {
+            KeychainManager.shared.deletePassword(for: profile.id)
+        }
         profiles = valid
         persist()
     }
@@ -97,7 +101,7 @@ public final class ProfileStore {
             NSUbiquitousKeyValueStore.default.synchronize()
             CloudSyncCoordinator.shared.recordSuccessfulSync()
         } catch {
-            logger.error("Failed to persist profiles: \(error.localizedDescription)")
+            logger.error("Failed to persist profiles: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -114,7 +118,7 @@ public final class ProfileStore {
             }
             return
         } catch {
-            logger.debug("Local profiles unreadable or not present: \(error.localizedDescription)")
+            logger.debug("Local profiles unreadable or not present: \(error.localizedDescription, privacy: .private)")
         }
 
         // Fresh installs do not silently adopt cloud profiles.
@@ -140,17 +144,17 @@ public final class ProfileStore {
         do {
             let decoded = try JSONDecoder().decode([ConnectionProfile].self, from: cloudData)
             let valid = validated(decoded)
-            profiles = valid
-            if valid.count == decoded.count {
-                try cloudData.write(to: fileURL, options: .atomic)
-            } else {
-                // Persist clean subset only; poisoned bytes never reach disk.
-                let clean = try JSONEncoder().encode(valid)
-                try clean.write(to: fileURL, options: .atomic)
+            // External changes never replace local profiles unattended; divergence requires user consent.
+            if valid == profiles {
+                // Disk already mirrors in-memory profiles; confirming sync health is sufficient.
+                CloudSyncCoordinator.shared.recordSuccessfulSync()
+            } else if CloudSyncCoordinator.shared.restoreOffer == nil {
+                logger.info("External iCloud profiles differ from local state; requesting user confirmation.")
+                CloudSyncCoordinator.shared.presentRestoreSheetManually()
             }
-            CloudSyncCoordinator.shared.recordSuccessfulSync()
         } catch {
-            logger.warning("Failed to decode external iCloud profiles update: \(error.localizedDescription)")
+            // Error bodies can echo wire payload fragments; keep them private.
+            logger.warning("Failed to decode external iCloud profiles update: \(error.localizedDescription, privacy: .private)")
         }
     }
 

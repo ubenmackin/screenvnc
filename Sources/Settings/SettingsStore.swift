@@ -16,6 +16,18 @@ public enum TabletopConsoleMode: String, Codable, Sendable, CaseIterable {
     }
 }
 
+public enum TwoFingerTrackpadAction: String, Codable, Sendable, CaseIterable {
+    case scrollRemote
+    case panViewport
+
+    public var displayName: String {
+        switch self {
+        case .scrollRemote: "Scroll Remote Mac"
+        case .panViewport: "Pan Zoomed Screen"
+        }
+    }
+}
+
 @Observable
 @MainActor
 public final class SettingsStore {
@@ -31,6 +43,33 @@ public final class SettingsStore {
 
     public var defaultPointerMode: PointerMode {
         didSet { UserDefaults.standard.set(defaultPointerMode.rawValue, forKey: "defaultPointerMode") }
+    }
+
+    public var trackpadSensitivity: Double {
+        didSet {
+            let clamped = min(max(trackpadSensitivity, 0.5), 2.5)
+            if clamped != trackpadSensitivity {
+                trackpadSensitivity = clamped
+                return
+            }
+            UserDefaults.standard.set(clamped, forKey: "trackpadSensitivity")
+        }
+    }
+
+    public var naturalScrolling: Bool {
+        didSet { UserDefaults.standard.set(naturalScrolling, forKey: "naturalScrolling") }
+    }
+
+    public var invertPanDirection: Bool {
+        didSet { UserDefaults.standard.set(invertPanDirection, forKey: "invertPanDirection") }
+    }
+
+    public var twoFingerTrackpadAction: TwoFingerTrackpadAction {
+        didSet { UserDefaults.standard.set(twoFingerTrackpadAction.rawValue, forKey: "twoFingerTrackpadAction") }
+    }
+
+    public var tapToClickInTrackpad: Bool {
+        didSet { UserDefaults.standard.set(tapToClickInTrackpad, forKey: "tapToClickInTrackpad") }
     }
 
     public var tabletopConsoleMode: TabletopConsoleMode {
@@ -65,6 +104,14 @@ public final class SettingsStore {
         let pointerDefault = PointerMode.directTouch.rawValue
         let pointerRaw = UserDefaults.standard.string(forKey: "defaultPointerMode") ?? pointerDefault
         defaultPointerMode = PointerMode(rawValue: pointerRaw) ?? .directTouch
+
+        let storedSensitivity = UserDefaults.standard.object(forKey: "trackpadSensitivity") as? Double ?? 1.0
+        trackpadSensitivity = min(max(storedSensitivity, 0.5), 2.5)
+        naturalScrolling = UserDefaults.standard.object(forKey: "naturalScrolling") as? Bool ?? true
+        invertPanDirection = UserDefaults.standard.bool(forKey: "invertPanDirection")
+        let twoFingerRaw = UserDefaults.standard.string(forKey: "twoFingerTrackpadAction") ?? TwoFingerTrackpadAction.scrollRemote.rawValue
+        twoFingerTrackpadAction = TwoFingerTrackpadAction(rawValue: twoFingerRaw) ?? .scrollRemote
+        tapToClickInTrackpad = UserDefaults.standard.object(forKey: "tapToClickInTrackpad") as? Bool ?? true
 
         let tabletopDefault = TabletopConsoleMode.auto.rawValue
         let tabletopRaw = UserDefaults.standard.string(forKey: "tabletopConsoleMode") ?? tabletopDefault

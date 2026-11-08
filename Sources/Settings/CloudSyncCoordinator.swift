@@ -173,7 +173,8 @@ public final class CloudSyncCoordinator {
             }
             logger.info("iCloud account status resolved: \(self.accountStatus.rawValue)")
         } catch {
-            logger.warning("CloudKit accountStatus check failed: \(error.localizedDescription) — inspecting ubiquity token")
+            // Error bodies can echo server-controlled content; keep them private.
+            logger.warning("CloudKit accountStatus check failed: \(error.localizedDescription, privacy: .private) — inspecting ubiquity token")
             if FileManager.default.ubiquityIdentityToken != nil {
                 accountStatus = .available
                 syncHealth = .synced
@@ -241,13 +242,15 @@ public final class CloudSyncCoordinator {
 
     /// Forces immediate KVS synchronization and updates timestamp.
     public func triggerManualSync() async {
-        isSyncing = true
+        // checkAccountStatus clears its own isSyncing flag on return, so the manual
+        // sync tail re-raises and owns the reset to keep the spinner continuous.
         await checkAccountStatus()
+        isSyncing = true
+        defer { isSyncing = false }
         let didSync = NSUbiquitousKeyValueStore.default.synchronize()
         if didSync {
             recordSuccessfulSync()
         }
-        isSyncing = false
     }
 
     public func recordSuccessfulSync() {

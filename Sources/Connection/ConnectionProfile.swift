@@ -140,4 +140,11 @@ public struct ConnectionProfile: Identifiable, Sendable, Hashable, Codable {
         guard parts.count == 4, let firstOctet = parts.first, firstOctet == "127" else { return false }
         return parts.dropFirst().allSatisfy { UInt8($0) != nil }
     }
+
+    /// Non-loopback VNC-DES exposes a crackable challenge response on the wire;
+    /// such sessions require explicit per-session consent before dialing.
+    public var requiresPlaintextConsent: Bool {
+        guard authMethod == .vncDES else { return false }
+        return !Self.isLoopbackHost(host.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
 }
