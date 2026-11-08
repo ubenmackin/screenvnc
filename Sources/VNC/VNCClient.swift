@@ -86,7 +86,6 @@ public actor VNCClient {
         try await executeHandshake(profile: profile, password: password)
         isRunning = true
         await updateState(.connected)
-        requestFramebufferUpdate(incremental: false)
 
         Task {
             await self.startReceiveLoop()
@@ -116,6 +115,9 @@ public actor VNCClient {
         ])
 
         connection.send(content: packet, completion: .contentProcessed { _ in })
+        if buttonMask != 0 {
+            requestFramebufferUpdate(incremental: true)
+        }
     }
 
     /// Sends keyboard key press or release event (RFC 6143 Section 7.5.4).
@@ -133,6 +135,7 @@ public actor VNCClient {
         ])
 
         connection.send(content: packet, completion: .contentProcessed { _ in })
+        requestFramebufferUpdate(incremental: true)
     }
 
     /// Requests an incremental or full framebuffer update from the remote server.
@@ -164,6 +167,25 @@ public actor VNCClient {
     }
 
     private func startReceiveLoop() async {
+        // Guarantee full-frame request at receive loop onset
+        requestFramebufferUpdate(incremental: false)
+
+        // Heartbeat watchdog: re-issues incremental request if connection is idle
+        let watchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 1_500_000_000)
+                } catch {
+                    break
+                }
+                guard let self, await self.isRunning else { break }
+                await self.requestFramebufferUpdate(incremental: true)
+            }
+        }
+        defer {
+            watchdogTask.cancel()
+        }
+
         while isRunning {
             do {
                 let msgTypeData = try await readExact(1)
@@ -210,6 +232,14 @@ public actor VNCClient {
     private func handleFramebufferUpdate() async throws {
         let header = try await readExact(3)
         let numRects = Int((UInt16(header[1]) << 8) | UInt16(header[2]))
+        if numRects == 0 {
+            do {
+                try await Task.sleep(nanoseconds: 30_000_000)
+            } catch {
+                return
+            }
+            return
+        }
         // Bound rect batch before looping; fail closed on excess.
         guard numRects <= 10000 else {
             throw VNCAuthError.authenticationRejected("Framebuffer update has too many rects: \(numRects).")

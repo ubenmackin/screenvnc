@@ -36,7 +36,7 @@ public struct SettingsView: View {
                     }
                 }
 
-                if DeviceModeDetector.isDuoDevice || deviceMode != .mode1NormalPhone {
+                if DeviceMode.shouldUseCompactIcons(deviceMode: deviceMode) {
                     Section("Foldable & Tabletop (iPhone Duo)") {
                         DisclosureGroup(isExpanded: $isTabletopExpanded) {
                             VStack(spacing: 8) {
@@ -153,7 +153,7 @@ public struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    if DeviceModeDetector.isDuoDevice || deviceMode == .mode3DuoOuterScreen {
+                    if DeviceMode.shouldUseCompactIcons(deviceMode: deviceMode) {
                         Button {
                             dismiss()
                         } label: {

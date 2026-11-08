@@ -79,6 +79,7 @@ public struct SoftwareKeyboardResponder: UIViewRepresentable {
         }
     }
 
+    @MainActor
     public final class KeyInputView: UIView, UIKeyInput {
         public var hasText: Bool {
             true
@@ -127,6 +128,7 @@ public struct InSessionView: View {
     @State private var isTabletopConsoleEnabled: Bool
     @State private var isToolbarCollapsed: Bool = false
     @State private var isKeyboardActive: Bool = false
+    @State private var tabletopCursor: CGPoint?
     @State private var connectionState: VNCConnectionState = .connecting
     @State private var errorMessage: String?
     @State private var pendingServerCutText: String?
@@ -252,7 +254,7 @@ public struct InSessionView: View {
                     FramebufferView(
                         framebuffer: framebuffer,
                         displayPreference: displayPreference,
-                        pointerMode: .directTouch,
+                        pointerMode: pointerMode,
                         onPointerEvent: handlePointerEvent,
                         isInputDisabled: settings.viewOnly
                     )
@@ -351,95 +353,51 @@ public struct InSessionView: View {
                 }
 
                 // Disconnect action
-                Button(role: .destructive) {
-                    onDismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.red)
-                        .frame(width: 36, height: 36)
-                }
+                SessionDisconnectButton(onDisconnect: onDismiss)
 
                 Divider().frame(height: 22)
 
                 // Software Keyboard Toggle
-                Button {
+                SessionKeyboardToggleButton(
+                    isKeyboardActive: isKeyboardActive,
+                    isInputDisabled: settings.viewOnly
+                ) {
                     isKeyboardActive.toggle()
-                } label: {
-                    Image(systemName: isKeyboardActive ? "keyboard.fill" : "keyboard")
-                        .font(.system(size: 16))
-                        .frame(width: 36, height: 36)
-                        .background(isKeyboardActive ? Color.accentColor : Color.secondary.opacity(0.15))
-                        .foregroundStyle(isKeyboardActive ? .white : .primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .disabled(settings.viewOnly)
-                .opacity(settings.viewOnly ? 0.4 : 1.0)
 
                 // Mouse Mode Toggle
-                Button {
+                SessionPointerModeButton(
+                    pointerMode: pointerMode,
+                    isInputDisabled: settings.viewOnly
+                ) {
                     pointerMode = (pointerMode == .directTouch) ? .virtualTrackpad : .directTouch
-                } label: {
-                    Image(systemName: pointerMode == .directTouch ? "hand.point.up.fill" : "cursorarrow.rays")
-                        .font(.system(size: 16))
-                        .frame(width: 36, height: 36)
-                        .background(Color.secondary.opacity(0.15))
-                        .foregroundStyle(.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .disabled(settings.viewOnly)
-                .opacity(settings.viewOnly ? 0.4 : 1.0)
 
                 // Display Mode Toggle
-                Button {
+                SessionDisplayModeButton {
                     toggleDisplayPreference()
-                } label: {
-                    Image(systemName: "aspectratio")
-                        .font(.system(size: 16))
-                        .frame(width: 36, height: 36)
-                        .background(Color.secondary.opacity(0.15))
-                        .foregroundStyle(.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
 
                 Divider().frame(height: 22)
 
                 // Modifiers
                 ForEach([MacKey.command, .option, .control, .shift]) { key in
-                    Button {
+                    SessionModifierButton(
+                        key: key,
+                        isActive: activeModifiers.contains(key),
+                        isInputDisabled: settings.viewOnly
+                    ) {
                         toggleStickyMacModifier(key, activeModifiers: &activeModifiers, onKeyPress: handleKeyPress)
-                    } label: {
-                        Text(key.symbol)
-                            .font(.system(.body, design: .rounded).bold())
-                            .frame(minWidth: 34, minHeight: 36)
-                            .background(activeModifiers.contains(key) ? Color.accentColor : Color.secondary.opacity(0.2))
-                            .foregroundStyle(activeModifiers.contains(key) ? .white : .primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
-                    .disabled(settings.viewOnly)
-                    .opacity(settings.viewOnly ? 0.4 : 1.0)
                 }
 
                 Divider().frame(height: 22)
 
                 // Mac Actions Menu
-                Menu {
-                    Button("⌘ + Tab (App Switcher)") { handleShortcut("cmd_tab") }
-                    Button("⌘ + Space (Spotlight)") { handleShortcut("spotlight") }
-                    Button("⌃ + ↑ (Mission Control)") { handleShortcut("mission_control") }
-                    Button("⌘ + W (Close Window)") { handleShortcut("close_window") }
-                    Button("⌘ + Q (Quit App)") { handleShortcut("quit_app") }
-                    Button("⌃ + ⌘ + Q (Lock Mac)") { handleShortcut("lock_mac") }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 18))
-                        .frame(width: 36, height: 36)
-                        .background(Color.secondary.opacity(0.15))
-                        .foregroundStyle(.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .disabled(settings.viewOnly)
-                .opacity(settings.viewOnly ? 0.4 : 1.0)
+                SessionMacActionsMenu(
+                    onSendShortcut: handleShortcut,
+                    isInputDisabled: settings.viewOnly
+                )
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -494,10 +452,16 @@ public struct InSessionView: View {
     }
 
     private func handlePointerDelta(deltaX: CGFloat, deltaY: CGFloat, buttonMask: UInt8) {
-        guard !settings.viewOnly else { return }
-        let newX = max(0, min(Int(CGFloat(framebuffer.width) / 2.0 + deltaX), framebuffer.width - 1))
-        let newY = max(0, min(Int(CGFloat(framebuffer.height) / 2.0 + deltaY), framebuffer.height - 1))
-        Task { await client.sendPointerEvent(posX: newX, posY: newY, buttonMask: buttonMask) }
+        guard !settings.viewOnly, framebuffer.width > 0, framebuffer.height > 0 else { return }
+        // Incremental deltas accumulate onto persistent cursor; never snap to center.
+        let base = tabletopCursor ?? CGPoint(
+            x: CGFloat(framebuffer.width) / 2.0,
+            y: CGFloat(framebuffer.height) / 2.0
+        )
+        let clampedX = max(0, min(base.x + deltaX, CGFloat(framebuffer.width - 1)))
+        let clampedY = max(0, min(base.y + deltaY, CGFloat(framebuffer.height - 1)))
+        tabletopCursor = CGPoint(x: clampedX, y: clampedY)
+        Task { await client.sendPointerEvent(posX: Int(clampedX), posY: Int(clampedY), buttonMask: buttonMask) }
     }
 
     private func waitBriefly() async {
@@ -511,13 +475,19 @@ public struct InSessionView: View {
     }
 
     private func handlePointerClick(buttonMask: UInt8) {
-        guard !settings.viewOnly else { return }
-        let midX = framebuffer.width / 2
-        let midY = framebuffer.height / 2
+        guard !settings.viewOnly, framebuffer.width > 0, framebuffer.height > 0 else { return }
+        // Click at persistent cursor so trackpad position never snaps to center.
+        let cursor = tabletopCursor ?? CGPoint(
+            x: CGFloat(framebuffer.width) / 2.0,
+            y: CGFloat(framebuffer.height) / 2.0
+        )
+        tabletopCursor = cursor
+        let clickX = Int(cursor.x)
+        let clickY = Int(cursor.y)
         Task {
-            await client.sendPointerEvent(posX: midX, posY: midY, buttonMask: buttonMask)
+            await client.sendPointerEvent(posX: clickX, posY: clickY, buttonMask: buttonMask)
             await waitBriefly()
-            await client.sendPointerEvent(posX: midX, posY: midY, buttonMask: 0)
+            await client.sendPointerEvent(posX: clickX, posY: clickY, buttonMask: 0)
         }
     }
 

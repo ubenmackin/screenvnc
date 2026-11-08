@@ -66,92 +66,51 @@ public struct OuterScreenRailView: View {
                 }
 
                 // Disconnect Action
-                Button(role: .destructive) {
-                    onDisconnect()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.red)
-                        .frame(width: 36, height: 36)
-                }
+                SessionDisconnectButton(onDisconnect: onDisconnect)
 
                 Divider().frame(width: 20)
 
                 // Software Keyboard Toggle
-                Button {
+                SessionKeyboardToggleButton(
+                    isKeyboardActive: isKeyboardActive,
+                    isInputDisabled: isInputDisabled
+                ) {
                     isKeyboardActive.toggle()
-                } label: {
-                    Image(systemName: isKeyboardActive ? "keyboard.fill" : "keyboard")
-                        .font(.system(size: 16))
-                        .frame(width: 36, height: 36)
-                        .background(isKeyboardActive ? Color.accentColor : Color.secondary.opacity(0.15))
-                        .foregroundStyle(isKeyboardActive ? .white : .primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .disabled(isInputDisabled)
-                .opacity(isInputDisabled ? 0.4 : 1.0)
 
                 // Pointer Mode Toggle
-                Button {
+                SessionPointerModeButton(
+                    pointerMode: pointerMode,
+                    isInputDisabled: isInputDisabled
+                ) {
                     onTogglePointerMode()
-                } label: {
-                    Image(systemName: pointerMode == .directTouch ? "hand.point.up.fill" : "cursorarrow.rays")
-                        .font(.system(size: 16))
-                        .frame(width: 36, height: 36)
-                        .background(Color.secondary.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .disabled(isInputDisabled)
-                .opacity(isInputDisabled ? 0.4 : 1.0)
 
                 Divider().frame(width: 20)
 
                 // Modifiers within direct thumb reach
                 ForEach([MacKey.command, .option, .control, .shift]) { key in
-                    Button {
+                    SessionModifierButton(
+                        key: key,
+                        isActive: activeModifiers.contains(key),
+                        isInputDisabled: isInputDisabled
+                    ) {
                         toggleStickyMacModifier(key, activeModifiers: &activeModifiers, onKeyPress: onKeyPress)
-                    } label: {
-                        Text(key.symbol)
-                            .font(.system(.subheadline, design: .rounded).bold())
-                            .frame(width: 36, height: 36)
-                            .background(activeModifiers.contains(key) ? Color.accentColor : Color.secondary.opacity(0.2))
-                            .foregroundStyle(activeModifiers.contains(key) ? .white : .primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
-                    .disabled(isInputDisabled)
-                    .opacity(isInputDisabled ? 0.4 : 1.0)
                 }
 
                 Divider().frame(width: 20)
 
                 // Zoom / Aspect Mode Toggle
-                Button {
+                SessionDisplayModeButton {
                     onToggleDisplayPreference()
-                } label: {
-                    Image(systemName: "aspectratio")
-                        .font(.system(size: 16))
-                        .frame(width: 36, height: 36)
-                        .background(Color.secondary.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
 
                 // Quick Mac Actions Menu
-                Menu {
-                    Button("⌘ + Tab (App Switcher)") { onSendShortcut("cmd_tab") }
-                    Button("⌘ + Space (Spotlight)") { onSendShortcut("spotlight") }
-                    Button("⌃ + ↑ (Mission Control)") { onSendShortcut("mission_control") }
-                    Button("⌘ + W (Close Window)") { onSendShortcut("close_window") }
-                    Button("⌘ + Q (Quit App)") { onSendShortcut("quit_app") }
-                    Button("⌃ + ⌘ + Q (Lock Mac)") { onSendShortcut("lock_mac") }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 18))
-                        .frame(width: 36, height: 36)
-                        .background(Color.secondary.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .disabled(isInputDisabled)
-                .opacity(isInputDisabled ? 0.4 : 1.0)
+                SessionMacActionsMenu(
+                    onSendShortcut: onSendShortcut,
+                    isInputDisabled: isInputDisabled
+                )
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 4)

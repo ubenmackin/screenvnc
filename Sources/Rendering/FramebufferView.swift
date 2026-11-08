@@ -23,7 +23,7 @@ public struct TwoFingerTapView: UIViewRepresentable {
     }
 
     public func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+        let view = PassthroughTwoFingerView()
         view.backgroundColor = .clear
         let recognizer = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         recognizer.numberOfTouchesRequired = 2
@@ -32,19 +32,32 @@ public struct TwoFingerTapView: UIViewRepresentable {
         return view
     }
 
-    public func updateUIView(_: UIView, context _: Context) {}
+    public func updateUIView(_: UIView, context: Context) {
+        // Refresh closure so rotation/resize uses live geometry.
+        context.coordinator.onTwoFingerTap = onTwoFingerTap
+    }
 
     public func makeCoordinator() -> Coordinator {
         Coordinator(onTwoFingerTap: onTwoFingerTap)
     }
 
+    private final class PassthroughTwoFingerView: UIView {
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            guard let touches = event?.allTouches, touches.count >= 2 else {
+                return nil
+            }
+            return super.hitTest(point, with: event)
+        }
+    }
+
     public final class Coordinator: NSObject {
-        let onTwoFingerTap: (CGPoint) -> Void
+        var onTwoFingerTap: (CGPoint) -> Void
         init(onTwoFingerTap: @escaping (CGPoint) -> Void) {
             self.onTwoFingerTap = onTwoFingerTap
         }
 
-        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+        /// Isolate to MainActor so gesture view APIs are reached safely.
+        @MainActor @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             let point = gesture.location(in: gesture.view)
             onTwoFingerTap(point)
         }
@@ -62,7 +75,7 @@ public struct FramebufferView: View {
     @State private var lastZoomScale: CGFloat = 1.0
     @State private var panOffset: CGSize = .zero
     @State private var lastPanOffset: CGSize = .zero
-    @State private var virtualCursor: CGPoint = .init(x: 960, y: 540)
+    @State private var virtualCursor: CGPoint = .zero
 
     public init(
         framebuffer: Framebuffer,
@@ -76,6 +89,11 @@ public struct FramebufferView: View {
         self.pointerMode = pointerMode
         self.onPointerEvent = onPointerEvent
         self.isInputDisabled = isInputDisabled
+        // Derive initial cursor from live canvas; never hardcode layout points.
+        _virtualCursor = State(initialValue: CGPoint(
+            x: CGFloat(max(framebuffer.width, 1)) / 2.0,
+            y: CGFloat(max(framebuffer.height, 1)) / 2.0
+        ))
     }
 
     public var body: some View {
@@ -83,7 +101,7 @@ public struct FramebufferView: View {
             ZStack {
                 Color.black
 
-                if let image = framebuffer.image {
+                if framebuffer.hasReceivedFirstFrame, let image = framebuffer.image {
                     let canvasImage = Image(decorative: image, scale: 1.0, orientation: .up)
                         .interpolation(.high)
                         .resizable()
@@ -103,9 +121,14 @@ public struct FramebufferView: View {
                     .gesture(magnificationGesture)
                     .gesture(pointerGesture(in: geometry.size))
                 } else {
-                    ProgressView("Connecting to Framebuffer...")
-                        .tint(.white)
-                        .foregroundStyle(.white)
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                            .tint(.white)
+                        Text("Connecting to Mac Desktop...")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
                 }
 
                 if pointerMode == .virtualTrackpad {
@@ -127,7 +150,15 @@ public struct FramebufferView: View {
                 .allowsHitTesting(true)
             }
             .clipped()
+            .onChange(of: framebuffer.width) { _, _ in clampVirtualCursor() }
+            .onChange(of: framebuffer.height) { _, _ in clampVirtualCursor() }
         }
+    }
+
+    /// Keeps the virtual cursor inside the live canvas after resizes.
+    private func clampVirtualCursor() {
+        virtualCursor.x = max(0, min(virtualCursor.x, CGFloat(max(framebuffer.width - 1, 0))))
+        virtualCursor.y = max(0, min(virtualCursor.y, CGFloat(max(framebuffer.height - 1, 0))))
     }
 
     private var magnificationGesture: some Gesture {

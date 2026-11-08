@@ -3,6 +3,7 @@
 import SwiftUI
 import XCTest
 
+@MainActor
 final class DeviceModeDetectorTests: XCTestCase {
     func testDetectMode2ForTabletOrUnfoldedDuo() {
         // Regular horizontal + regular vertical traits -> Mode 2 (iPad / Duo Inner Display)

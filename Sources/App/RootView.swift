@@ -43,17 +43,10 @@ public struct RootView: View {
 
             Group {
                 switch mode {
-                case .mode1NormalPhone:
+                case .mode1NormalPhone, .mode3DuoOuterScreen:
                     mode1PhoneView
                 case .mode2InnerDisplayOrPad:
                     mode2TabletView
-                case .mode3DuoOuterScreen:
-                    CoverScreenView(
-                        onPresentSettings: { isPresentingSettings = true },
-                        onPresentNewProfile: { isPresentingNewProfile = true },
-                        onStartConnection: { startConnection($0) },
-                        onConnectDiscovered: { connectDiscovered($0) }
-                    )
                 }
             }
             .onAppear {
@@ -69,7 +62,7 @@ public struct RootView: View {
             }
         }
         .sheet(isPresented: $isPresentingNewProfile) {
-            EditProfileView { profile, password in
+            EditProfileView(deviceMode: currentDeviceMode) { profile, password in
                 profileStore.save(profile)
                 if let password {
                     do {
@@ -81,7 +74,7 @@ public struct RootView: View {
             }
         }
         .sheet(item: $profileToEdit) { profile in
-            EditProfileView(profileToEdit: profile) { updated, password in
+            EditProfileView(profileToEdit: profile, deviceMode: currentDeviceMode) { updated, password in
                 profileStore.save(updated)
                 if let password {
                     do {
@@ -119,26 +112,11 @@ public struct RootView: View {
     private var mode1PhoneView: some View {
         NavigationStack {
             List {
-                discoveredMacsSection
-                favoritesSection
-                savedSessionsSection
+                connectionListContent
             }
             .navigationTitle("ScreenVNC")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        isPresentingSettings = true
-                    } label: {
-                        Image(systemName: "gear")
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        isPresentingNewProfile = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
+                connectionListToolbar
             }
         }
     }
@@ -147,26 +125,11 @@ public struct RootView: View {
     private var mode2TabletView: some View {
         NavigationSplitView {
             List(selection: $selectedProfile) {
-                discoveredMacsSection
-                favoritesSection
-                savedSessionsSection
+                connectionListContent
             }
             .navigationTitle("ScreenVNC")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        isPresentingSettings = true
-                    } label: {
-                        Image(systemName: "gear")
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        isPresentingNewProfile = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
+                connectionListToolbar
             }
         } detail: {
             if let selected = selectedProfile {
@@ -179,6 +142,33 @@ public struct RootView: View {
                     systemImage: "macbook.and.iphone",
                     description: Text("Choose a Mac from the sidebar or discover one on your local network.")
                 )
+            }
+        }
+    }
+
+    /// Shared rows for phone and tablet lists so both stay in sync.
+    @ViewBuilder
+    private var connectionListContent: some View {
+        discoveredMacsSection
+        favoritesSection
+        savedSessionsSection
+    }
+
+    /// Shared toolbar so phone and tablet expose the same actions.
+    @ToolbarContentBuilder
+    private var connectionListToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button {
+                isPresentingSettings = true
+            } label: {
+                Image(systemName: "gear")
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                isPresentingNewProfile = true
+            } label: {
+                Image(systemName: "plus")
             }
         }
     }
@@ -231,6 +221,11 @@ public struct RootView: View {
             Section("Favorites") {
                 ForEach(favorites) { profile in
                     profileRow(profile)
+                }
+                .onDelete { indexSet in
+                    for index in indexSet {
+                        profileStore.remove(id: favorites[index].id)
+                    }
                 }
             }
         }
