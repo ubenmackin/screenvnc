@@ -110,88 +110,6 @@ header nav a:hover {
   text-decoration: underline;
 }
 
-.hero {
-  padding-top: 3.5rem;
-}
-
-.hero h1 {
-  font-size: clamp(2rem, 4vw + 1rem, 3.25rem);
-  letter-spacing: -0.02em;
-}
-
-.hero p {
-  margin-top: 1rem;
-  font-size: clamp(1.05rem, 1vw + 0.9rem, 1.3rem);
-  color: var(--muted);
-}
-
-.feature-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-  margin-top: 1.25rem;
-}
-
-#features article {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 1.25rem;
-  min-width: 0;
-}
-
-#features article h3 {
-  font-size: 1.02rem;
-  margin-bottom: 0.5rem;
-}
-
-#features article p {
-  font-size: 0.95rem;
-  color: var(--muted);
-}
-
-.tour-entry,
-#tour article,
-.tour article {
-  display: grid;
-  grid-template-columns: 1fr minmax(0, 320px);
-  gap: 1.5rem;
-  align-items: center;
-  margin-top: 1.5rem;
-  min-width: 0;
-}
-
-.tour-entry figure,
-#tour article figure,
-.tour article figure {
-  width: 100%;
-  max-width: 320px;
-  justify-self: end;
-  min-width: 0;
-}
-
-.tour-entry.flip figure,
-#tour article.flip figure,
-.tour article.flip figure {
-  order: -1;
-  justify-self: start;
-}
-
-#screenshots {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-}
-
-#screenshots h2 {
-  grid-column: 1 / -1;
-}
-
-#screenshots > p {
-  grid-column: 1 / -1;
-  color: var(--muted);
-}
-
 figure {
   background: var(--card);
   border: 1px solid var(--line);
@@ -202,7 +120,10 @@ figure {
 }
 
 figure img {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
   background: var(--navy-deep);
 }
 
@@ -210,6 +131,52 @@ figcaption {
   padding: 0.65rem 1rem 0.85rem;
   font-size: 0.875rem;
   color: var(--muted);
+}
+
+.tour-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.tour-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+  padding: 1.25rem;
+  min-width: 0;
+}
+
+.tour-card h3 {
+  font-size: 1.02rem;
+}
+
+.tour-card figure {
+  margin: 0;
+}
+
+.tour-card img {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 420px;
+  margin: 0 auto;
+}
+
+.tour-wide {
+  margin-top: 1rem;
+}
+
+.tour-wide img {
+  width: 100%;
+  max-width: 100%;
+  max-height: none;
+  margin: 0;
 }
 
 table {
@@ -297,31 +264,12 @@ footer a {
 }
 
 @media (max-width: 720px) {
-  .feature-grid {
+  .tour-grid {
     grid-template-columns: 1fr;
   }
 
-  .tour-entry,
-  #tour article,
-  .tour article {
-    grid-template-columns: 1fr;
-  }
-
-  .tour-entry figure,
-  #tour article figure,
-  .tour article figure {
-    max-width: 100%;
-    justify-self: stretch;
-  }
-
-  .tour-entry.flip figure,
-  #tour article.flip figure,
-  .tour article.flip figure {
-    order: 0;
-  }
-
-  #screenshots {
-    grid-template-columns: 1fr;
+  .tour-card img {
+    max-height: 380px;
   }
 }
 
