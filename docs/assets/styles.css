@@ -49,6 +49,7 @@ main {
 
 section {
   padding: 2.5rem 0 0;
+  min-width: 0;
 }
 
 h1,
@@ -68,7 +69,6 @@ a {
   transition: color 160ms ease, background-color 160ms ease;
 }
 
-/* Prefixed blur keeps the frosted header intact in Safari versions lacking the unprefixed property. */
 header {
   position: sticky;
   top: 0;
@@ -78,25 +78,30 @@ header {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.75rem max(1rem, calc((100% - var(--content-width)) / 2));
-  background: var(--glass);
-  -webkit-backdrop-filter: blur(14px) saturate(1.4);
-  backdrop-filter: blur(14px) saturate(1.4);
+  background: var(--paper);
   border-bottom: 1px solid var(--line);
 }
 
 header p {
+  flex-shrink: 0;
   font-weight: 700;
   letter-spacing: 0.01em;
   color: var(--navy);
 }
 
+/* Non-wrapping nav scrolls horizontally on narrow screens instead of wrapping. */
 header nav {
   display: flex;
   gap: 1rem;
   font-size: 0.95rem;
+  white-space: nowrap;
+  overflow-x: auto;
+  max-width: 100%;
+  min-width: 0;
 }
 
 header nav a {
+  flex-shrink: 0;
   text-decoration: none;
   padding: 0.25rem 0.1rem;
 }
@@ -132,6 +137,7 @@ header nav a:hover {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 1.25rem;
+  min-width: 0;
 }
 
 #features article h3 {
@@ -144,6 +150,33 @@ header nav a:hover {
   color: var(--muted);
 }
 
+.tour-entry,
+#tour article,
+.tour article {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 320px);
+  gap: 1.5rem;
+  align-items: center;
+  margin-top: 1.5rem;
+  min-width: 0;
+}
+
+.tour-entry figure,
+#tour article figure,
+.tour article figure {
+  width: 100%;
+  max-width: 320px;
+  justify-self: end;
+  min-width: 0;
+}
+
+.tour-entry.flip figure,
+#tour article.flip figure,
+.tour article.flip figure {
+  order: -1;
+  justify-self: start;
+}
+
 #screenshots {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -154,24 +187,62 @@ header nav a:hover {
   grid-column: 1 / -1;
 }
 
-#screenshots figure {
+#screenshots > p {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+figure {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
 }
 
-#screenshots figure img {
+figure img {
   width: 100%;
   background: var(--navy-deep);
 }
 
-#screenshots figcaption {
+figcaption {
   padding: 0.65rem 1rem 0.85rem;
   font-size: 0.875rem;
   color: var(--muted);
 }
 
+table {
+  width: 100%;
+  max-width: 100%;
+  margin-top: 1rem;
+  border-collapse: collapse;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+}
+
+th,
+td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+
+th {
+  text-align: left;
+  color: var(--navy);
+}
+
+tr:last-child th,
+tr:last-child td {
+  border-bottom: none;
+}
+
+#setup ol,
 #support ol {
   margin: 1rem 0 0 1.25rem;
   display: grid;
@@ -182,17 +253,25 @@ header nav a:hover {
   margin-top: 1.25rem;
 }
 
-#support p a {
+#support p a,
+#support a.button,
+a.button,
+.button {
   display: inline-block;
+  max-width: 100%;
   background: var(--navy);
   color: var(--accent-ink);
   font-weight: 600;
   text-decoration: none;
   padding: 0.7rem 1.3rem;
   border-radius: 999px;
+  overflow-wrap: break-word;
 }
 
-#support p a:hover {
+#support p a:hover,
+#support a.button:hover,
+a.button:hover,
+.button:hover {
   background: var(--navy-deep);
 }
 
@@ -218,12 +297,27 @@ footer a {
 }
 
 @media (max-width: 720px) {
-  header {
-    flex-wrap: wrap;
-  }
-
   .feature-grid {
     grid-template-columns: 1fr;
+  }
+
+  .tour-entry,
+  #tour article,
+  .tour article {
+    grid-template-columns: 1fr;
+  }
+
+  .tour-entry figure,
+  #tour article figure,
+  .tour article figure {
+    max-width: 100%;
+    justify-self: stretch;
+  }
+
+  .tour-entry.flip figure,
+  #tour article.flip figure,
+  .tour article.flip figure {
+    order: 0;
   }
 
   #screenshots {
@@ -244,18 +338,25 @@ footer a {
   h1,
   h2,
   h3,
+  th,
   header p,
   header nav a,
   a {
     color: var(--ink);
   }
 
-  #support p a {
+  #support p a,
+  #support a.button,
+  a.button,
+  .button {
     background: var(--ink);
     color: var(--navy-deep);
   }
 
-  #support p a:hover {
+  #support p a:hover,
+  #support a.button:hover,
+  a.button:hover,
+  .button:hover {
     background: #ffffff;
   }
 
