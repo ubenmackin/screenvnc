@@ -29,6 +29,14 @@ For _fastlane_ installation instructions, see [Installing _fastlane_](https://do
 
 
 
+### screenshots_ipad
+
+```sh
+[bundle exec] fastlane screenshots_ipad
+```
+
+
+
 ### screenshots_duo_inner
 
 ```sh

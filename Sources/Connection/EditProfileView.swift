@@ -111,8 +111,11 @@ public struct EditProfileView: View {
                         } label: {
                             Image(systemName: "xmark")
                         }
+                        .accessibilityIdentifier("CancelButton")
+                        .accessibilityLabel("Cancel")
                     } else {
                         Button("Cancel") { dismiss() }
+                            .accessibilityIdentifier("CancelButton")
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -124,8 +127,11 @@ public struct EditProfileView: View {
                                 .font(.body.bold())
                                 .foregroundStyle(.blue)
                         }
+                        .accessibilityIdentifier("SaveButton")
+                        .accessibilityLabel("Save")
                     } else {
                         Button("Save") { saveProfile() }
+                            .accessibilityIdentifier("SaveButton")
                     }
                 }
             }
