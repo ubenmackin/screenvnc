@@ -151,6 +151,8 @@ public struct RootView: View {
             } label: {
                 Image(systemName: "gear")
             }
+            .accessibilityIdentifier("SettingsButton")
+            .accessibilityLabel("Settings")
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -158,6 +160,8 @@ public struct RootView: View {
             } label: {
                 Image(systemName: "plus")
             }
+            .accessibilityIdentifier("AddConnectionButton")
+            .accessibilityLabel("Add Connection")
         }
     }
 

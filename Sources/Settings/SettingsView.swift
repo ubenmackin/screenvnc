@@ -188,10 +188,13 @@ public struct SettingsView: View {
                                 .font(.body.bold())
                                 .foregroundStyle(.blue)
                         }
+                        .accessibilityIdentifier("DoneButton")
+                        .accessibilityLabel("Done")
                     } else {
                         Button("Done") {
                             dismiss()
                         }
+                        .accessibilityIdentifier("DoneButton")
                     }
                 }
             }

@@ -37,14 +37,39 @@ final class ScreenVNCScreenshots: XCTestCase {
         }
     }
 
-    private var isCompact: Bool {
-        if app.windows.firstMatch.exists {
-            return app.windows.firstMatch.frame.width < 600
+    private func findButton(identifier: String, predicate: NSPredicate) -> XCUIElement? {
+        let identified = app.buttons[identifier]
+        if identified.waitForExistence(timeout: 2), identified.isHittable {
+            return identified
         }
-        return true
+        let navMatch = app.navigationBars.buttons.matching(predicate).firstMatch
+        if navMatch.waitForExistence(timeout: 1), navMatch.isHittable {
+            return navMatch
+        }
+        let appMatch = app.buttons.matching(predicate).firstMatch
+        if appMatch.waitForExistence(timeout: 1), appMatch.isHittable {
+            return appMatch
+        }
+        return app.buttons.allElementsBoundByIndex.first(where: {
+            predicate.evaluate(with: $0) && $0.isHittable
+        })
     }
 
     private func dismissModal() {
+        let cancelBtn = app.buttons["CancelButton"]
+        if cancelBtn.waitForExistence(timeout: 2), cancelBtn.isHittable {
+            cancelBtn.tap()
+            sleep(1)
+            return
+        }
+
+        let doneBtn = app.buttons["DoneButton"]
+        if doneBtn.waitForExistence(timeout: 2), doneBtn.isHittable {
+            doneBtn.tap()
+            sleep(1)
+            return
+        }
+
         let dismissPredicate = NSPredicate(
             format: "label CONTAINS[c] 'cancel' OR identifier CONTAINS[c] 'cancel' " +
                 "OR label CONTAINS[c] 'done' OR identifier CONTAINS[c] 'done' " +
@@ -81,8 +106,7 @@ final class ScreenVNCScreenshots: XCTestCase {
             format: "label CONTAINS[c] 'add' OR identifier CONTAINS[c] 'add' " +
                 "OR label == '+' OR label CONTAINS[c] 'plus' OR identifier CONTAINS[c] 'plus'"
         )
-        let addBtn = app.navigationBars.buttons.matching(addPredicate).firstMatch
-        if addBtn.waitForExistence(timeout: 3), addBtn.isHittable {
+        if let addBtn = findButton(identifier: "AddConnectionButton", predicate: addPredicate) {
             addBtn.tap()
             sleep(2)
             snapshot("02NewConnection")
@@ -94,27 +118,22 @@ final class ScreenVNCScreenshots: XCTestCase {
             format: "label CONTAINS[c] 'gear' OR identifier CONTAINS[c] 'gear' " +
                 "OR label CONTAINS[c] 'setting' OR identifier CONTAINS[c] 'setting'"
         )
-        let settingsBtn = app.navigationBars.buttons.matching(settingsPredicate).firstMatch
-        if settingsBtn.waitForExistence(timeout: 3), settingsBtn.isHittable {
+        if let settingsBtn = findButton(identifier: "SettingsButton", predicate: settingsPredicate) {
             settingsBtn.tap()
             sleep(2)
             snapshot("03Settings")
             dismissModal()
         }
 
-        // 04 Profile Detail View
-        let profilePredicate = NSPredicate(format: "label CONTAINS[c] 'Studio Mac Pro' OR identifier CONTAINS[c] 'Studio Mac Pro'")
-        let targetProfile = app.buttons.matching(profilePredicate).firstMatch
-        if targetProfile.waitForExistence(timeout: 3), targetProfile.isHittable {
-            if !isCompact {
-                // On iPad split view, tapping the row selects it in the detail pane
-                targetProfile.tap()
-                sleep(2)
-                snapshot("04ProfileDetail")
-            } else {
-                // On phone or compact view, inspect or capture profile in view
-                snapshot("04ProfileDetail")
-            }
+        // 04 Profile Detail View (Active Remote Desktop Session)
+        let profilePredicate = NSPredicate(
+            format: "label CONTAINS[c] 'Studio Mac Pro' OR identifier CONTAINS[c] 'Studio Mac Pro'"
+        )
+        let targetProfile = findButton(identifier: "ProfileRow_Studio Mac Pro", predicate: profilePredicate)
+        if let targetProfile {
+            targetProfile.tap()
+            sleep(2)
+            snapshot("04ProfileDetail")
         }
     }
 }

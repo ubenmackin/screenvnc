@@ -49,6 +49,8 @@ public struct ProfileRowView: View {
             }
             .contentShape(Rectangle())
         }
+        .accessibilityIdentifier("ProfileRow_\(profile.name)")
+        .accessibilityLabel(profile.name)
         .buttonStyle(.plain)
         .contextMenu {
             Button("Edit") { onEdit() }
