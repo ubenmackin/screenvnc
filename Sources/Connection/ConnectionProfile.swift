@@ -76,7 +76,25 @@ public struct ConnectionProfile: Identifiable, Sendable, Hashable, Codable {
     public var macAddress: String?
     public var isFavorite: Bool
     public var requiresBiometrics: Bool
+    public var allowUnencryptedSession: Bool
     public var lastConnectedDate: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case host
+        case port
+        case authMethod
+        case username
+        case displayPreference
+        case qualityPreference
+        case pointerMode
+        case macAddress
+        case isFavorite
+        case requiresBiometrics
+        case allowUnencryptedSession
+        case lastConnectedDate
+    }
 
     public init(
         id: UUID = UUID(),
@@ -91,6 +109,7 @@ public struct ConnectionProfile: Identifiable, Sendable, Hashable, Codable {
         macAddress: String? = nil,
         isFavorite: Bool = false,
         requiresBiometrics: Bool = false,
+        allowUnencryptedSession: Bool = false,
         lastConnectedDate: Date? = nil
     ) {
         self.id = id
@@ -105,7 +124,26 @@ public struct ConnectionProfile: Identifiable, Sendable, Hashable, Codable {
         self.macAddress = macAddress
         self.isFavorite = isFavorite
         self.requiresBiometrics = requiresBiometrics
+        self.allowUnencryptedSession = allowUnencryptedSession
         self.lastConnectedDate = lastConnectedDate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        host = try container.decode(String.self, forKey: .host)
+        port = try container.decode(Int.self, forKey: .port)
+        authMethod = try container.decode(AuthMethod.self, forKey: .authMethod)
+        username = try container.decode(String.self, forKey: .username)
+        displayPreference = try container.decode(DisplayPreference.self, forKey: .displayPreference)
+        qualityPreference = try container.decode(QualityPreference.self, forKey: .qualityPreference)
+        pointerMode = try container.decodeIfPresent(PointerMode.self, forKey: .pointerMode)
+        macAddress = try container.decodeIfPresent(String.self, forKey: .macAddress)
+        isFavorite = try container.decode(Bool.self, forKey: .isFavorite)
+        requiresBiometrics = try container.decode(Bool.self, forKey: .requiresBiometrics)
+        allowUnencryptedSession = try container.decodeIfPresent(Bool.self, forKey: .allowUnencryptedSession) ?? false
+        lastConnectedDate = try container.decodeIfPresent(Date.self, forKey: .lastConnectedDate)
     }
 
     /// Profiles enforce minimum network viability before dialing remote hosts.
@@ -142,9 +180,9 @@ public struct ConnectionProfile: Identifiable, Sendable, Hashable, Codable {
     }
 
     /// Non-loopback VNC-DES exposes a crackable challenge response on the wire;
-    /// such sessions require explicit per-session consent before dialing.
+    /// such sessions require explicit consent before dialing unless the user opted to always allow.
     public var requiresPlaintextConsent: Bool {
-        guard authMethod == .vncDES else { return false }
+        guard authMethod == .vncDES, !allowUnencryptedSession else { return false }
         return !Self.isLoopbackHost(host.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }

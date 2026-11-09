@@ -36,6 +36,24 @@ public extension VNCClientDelegate {
     func vncClient(_: VNCClient, didUpdateCursor _: DecodedCursor?) {}
 }
 
+/// Callback runs on NWConnection queue outside Task context, so timeout
+/// must be tracked explicitly to distinguish timeout from user cancellation.
+private final class DialTimeoutFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var timedOut = false
+    func markTimedOut() {
+        lock.lock()
+        timedOut = true
+        lock.unlock()
+    }
+
+    var hasTimedOut: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return timedOut
+    }
+}
+
 public actor VNCClient {
     public private(set) var state: VNCConnectionState = .disconnected
     public internal(set) var desktopWidth: Int = 1920
@@ -89,21 +107,63 @@ public actor VNCClient {
         return sanitizedWireReason(from: Data(reason.utf8))
     }
 
+    /// Maps low-level NWError states (including .waiting on unresolvable .local over VPN) to user-facing errors.
+    static func connectionFailureError(for _: Error, host: String, port: Int) -> VNCAuthError {
+        if host.lowercased().hasSuffix(".local") {
+            return .authenticationRejected(
+                "Unable to reach \(host):\(port). Bonjour (.local) names only work on local Wi-Fi/LAN; use the Mac's IP address over VPN."
+            )
+        }
+        return .authenticationRejected(
+            "Unable to connect to \(host):\(port). Verify the Mac is online and Screen Sharing is enabled."
+        )
+    }
+
+    static func connectionTimeoutError(host: String, port: Int) -> VNCAuthError {
+        if host.lowercased().hasSuffix(".local") {
+            return .authenticationRejected(
+                "Connection to \(host):\(port) timed out. Over VPN, use the Mac's IP address instead of a .local name."
+            )
+        }
+        return .authenticationRejected(
+            "Connection to \(host):\(port) timed out. Verify the Mac is reachable on your network or VPN."
+        )
+    }
+
     /// Connects to a remote host and executes the RFB protocol handshake.
     public func connect(profile: ConnectionProfile, password: String?) async throws {
         try profile.validate()
         await updateState(.connecting)
 
-        let host = NWEndpoint.Host(profile.host)
+        let trimmedHost = profile.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let host = NWEndpoint.Host(trimmedHost)
         guard let port = NWEndpoint.Port(rawValue: UInt16(profile.port)) else {
             let errorMsg = "Invalid port \(profile.port)"
             await updateState(.failed(errorMsg))
             throw ProfileValidationError.invalidPort(profile.port)
         }
 
-        let tcpParams = NWParameters.tcp
+        let tcpOptions = NWProtocolTCP.Options()
+        tcpOptions.connectionTimeout = 10
+        let tcpParams = NWParameters(tls: nil, tcp: tcpOptions)
         let conn = NWConnection(host: host, port: port, using: tcpParams)
         connection = conn
+
+        let didTimeout = DialTimeoutFlag()
+        let timeoutTask = Task {
+            do {
+                try await Task.sleep(for: .seconds(10))
+                didTimeout.markTimedOut()
+                conn.cancel()
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+        }
+        defer {
+            timeoutTask.cancel()
+        }
 
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -112,12 +172,31 @@ public actor VNCClient {
                     case .ready:
                         conn.stateUpdateHandler = nil
                         continuation.resume()
+                    case let .waiting(error):
+                        conn.stateUpdateHandler = nil
+                        conn.cancel()
+                        continuation.resume(throwing: VNCClient.connectionFailureError(
+                            for: error,
+                            host: trimmedHost,
+                            port: profile.port
+                        ))
                     case let .failed(error):
                         conn.stateUpdateHandler = nil
-                        continuation.resume(throwing: error)
+                        continuation.resume(throwing: VNCClient.connectionFailureError(
+                            for: error,
+                            host: trimmedHost,
+                            port: profile.port
+                        ))
                     case .cancelled:
                         conn.stateUpdateHandler = nil
-                        continuation.resume(throwing: CancellationError())
+                        if didTimeout.hasTimedOut {
+                            continuation.resume(throwing: VNCClient.connectionTimeoutError(
+                                host: trimmedHost,
+                                port: profile.port
+                            ))
+                        } else {
+                            continuation.resume(throwing: CancellationError())
+                        }
                     default:
                         break
                     }
@@ -127,6 +206,8 @@ public actor VNCClient {
         } onCancel: {
             conn.cancel()
         }
+        // Dial succeeded; disarm timeout so slow handshake never trips dial timer.
+        timeoutTask.cancel()
 
         try await executeHandshake(profile: profile, password: password)
         isRunning = true
@@ -444,14 +525,17 @@ public actor VNCClient {
     }
 
     private func handleDesktopResizeRect(width: Int, height: Int) async {
+        let didChangeDimensions = (width != desktopWidth || height != desktopHeight)
         desktopWidth = width
         desktopHeight = height
+        guard didChangeDimensions else { return }
         let capturedDelegate = delegate
         let capturedSelf = self
         // Hop resize to MainActor; session state stays actor-isolated.
         await MainActor.run {
             capturedDelegate?.vncClient(capturedSelf, didResizeDesktopWidth: width, height: height)
         }
+        requestFramebufferUpdate(incremental: false)
     }
 
     private func readCopyRectOp(rectX: Int, rectY: Int, width: Int, height: Int) async throws -> FramebufferUpdateOp? {

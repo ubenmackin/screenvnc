@@ -44,6 +44,8 @@ public final class Framebuffer {
         guard width > 0, height > 0 else { return }
         // Cap absurd sizes so a corrupt DesktopSize cannot force a huge allocation.
         guard width <= 16384, height <= 16384 else { return }
+        // Ignore no-op DesktopSize pseudo-rects so an already-rendered frame is never wiped.
+        guard width != self.width || height != self.height else { return }
         let (pixels, mulOverflow) = width.multipliedReportingOverflow(by: height)
         guard !mulOverflow else { return }
         let (_, byteOverflow) = pixels.multipliedReportingOverflow(by: bytesPerPixel)

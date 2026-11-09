@@ -83,6 +83,12 @@ public enum SampleDataSeeder {
         ]
         BonjourDiscoveryService.shared.seedSampleDiscoveredHosts(mockDiscovered)
 
+        var sampleStatuses: [UUID: HostReachabilityStatus] = [:]
+        for (idx, profile) in ProfileStore.shared.profiles.enumerated() {
+            sampleStatuses[profile.id] = idx == 3 ? .offline : .online
+        }
+        HostReachabilityService.shared.seedSampleStatuses(sampleStatuses)
+
         SettingsStore.shared.hasCompletedInitialSetup = true
     }
 }

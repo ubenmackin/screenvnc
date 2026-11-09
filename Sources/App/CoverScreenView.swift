@@ -4,6 +4,7 @@ import SwiftUI
 public struct CoverScreenView: View {
     private var profileStore = ProfileStore.shared
     private var discoveryService = BonjourDiscoveryService.shared
+    private var reachabilityService = HostReachabilityService.shared
 
     public var onPresentSettings: @MainActor () -> Void
     public var onPresentNewProfile: @MainActor () -> Void
@@ -67,6 +68,7 @@ public struct CoverScreenView: View {
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 ForEach(profileStore.profiles) { profile in
+                    let status = reachabilityService.status(for: profile.id)
                     Button {
                         onStartConnection(profile)
                     } label: {
@@ -74,8 +76,9 @@ public struct CoverScreenView: View {
                             HStack {
                                 Image(systemName: "display")
                                     .font(.headline)
-                                    .foregroundStyle(Color.accentColor)
+                                    .foregroundStyle(status == .offline ? Color.secondary : Color.accentColor)
                                 Spacer()
+                                ReachabilityStatusBadge(status: status)
                                 if profile.isFavorite {
                                     Image(systemName: "star.fill")
                                         .font(.caption2)

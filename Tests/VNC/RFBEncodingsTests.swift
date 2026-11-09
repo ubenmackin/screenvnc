@@ -109,5 +109,15 @@ final class RFBEncodingsTests: XCTestCase {
         fb.updateCursor(nil)
         XCTAssertFalse(fb.isCursorVisible)
         XCTAssertNil(fb.cursorImage)
+
+        // Same-dimension resize is a no-op and preserves hasReceivedFirstFrame.
+        fb.resize(width: 8, height: 8)
+        XCTAssertTrue(fb.hasReceivedFirstFrame)
+
+        // Different-dimension resize resets hasReceivedFirstFrame until new frame arrives.
+        fb.resize(width: 16, height: 16)
+        XCTAssertFalse(fb.hasReceivedFirstFrame)
+        XCTAssertEqual(fb.width, 16)
+        XCTAssertEqual(fb.height, 16)
     }
 }

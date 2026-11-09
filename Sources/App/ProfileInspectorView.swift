@@ -1,8 +1,54 @@
 // App — Detailed inspector and row presentation for connection profiles.
 import SwiftUI
 
+extension HostReachabilityStatus {
+    var dotColor: Color {
+        switch self {
+        case .online: .green
+        case .offline: .secondary
+        case .checking: .orange
+        case .unknown: .clear
+        }
+    }
+}
+
+public struct ReachabilityStatusBadge: View {
+    public let status: HostReachabilityStatus
+
+    public init(status: HostReachabilityStatus) {
+        self.status = status
+    }
+
+    public var body: some View {
+        if status != .unknown {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(status.dotColor)
+                    .frame(width: 7, height: 7)
+                Text(status.label)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(textColor)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(status.dotColor.opacity(0.14))
+            .clipShape(Capsule())
+        }
+    }
+
+    private var textColor: Color {
+        switch status {
+        case .online: .green
+        case .offline: .secondary
+        case .checking: .orange
+        case .unknown: .secondary
+        }
+    }
+}
+
 public struct ProfileRowView: View {
     public let profile: ConnectionProfile
+    public var reachabilityStatus: HostReachabilityStatus
     public var onConnect: @MainActor () -> Void
     public var onEdit: @MainActor () -> Void
     public var onToggleFavorite: @MainActor () -> Void
@@ -10,12 +56,14 @@ public struct ProfileRowView: View {
 
     public init(
         profile: ConnectionProfile,
+        reachabilityStatus: HostReachabilityStatus = .unknown,
         onConnect: @escaping @MainActor () -> Void,
         onEdit: @escaping @MainActor () -> Void,
         onToggleFavorite: @escaping @MainActor () -> Void,
         onDelete: @escaping @MainActor () -> Void
     ) {
         self.profile = profile
+        self.reachabilityStatus = reachabilityStatus
         self.onConnect = onConnect
         self.onEdit = onEdit
         self.onToggleFavorite = onToggleFavorite
@@ -27,25 +75,39 @@ public struct ProfileRowView: View {
             onConnect()
         } label: {
             HStack {
-                Image(systemName: "display")
-                    .font(.title3)
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 32)
+                ZStack(alignment: .bottomTrailing) {
+                    Image(systemName: "display")
+                        .font(.title3)
+                        .foregroundStyle(reachabilityStatus == .offline ? Color.secondary : Color.accentColor)
+                        .frame(width: 32, height: 28)
+
+                    if reachabilityStatus != .unknown {
+                        Circle()
+                            .fill(reachabilityStatus.dotColor)
+                            .frame(width: 9, height: 9)
+                            .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 1.5))
+                    }
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(profile.name)
-                        .font(.headline)
-                        .foregroundStyle(Color.primary)
+                    HStack(spacing: 6) {
+                        Text(profile.name)
+                            .font(.headline)
+                            .foregroundStyle(Color.primary)
+                            .lineLimit(1)
+                        ReachabilityStatusBadge(status: reachabilityStatus)
+                    }
                     Text("\(profile.host):\(String(profile.port)) • \(profile.authMethod.displayName)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
                 Spacer()
 
                 Image(systemName: "play.circle.fill")
                     .font(.title2)
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(reachabilityStatus == .offline ? Color.secondary.opacity(0.6) : Color.accentColor)
             }
             .contentShape(Rectangle())
         }
@@ -62,10 +124,16 @@ public struct ProfileRowView: View {
 
 public struct ProfileInspectorView: View {
     public let profile: ConnectionProfile
+    public var reachabilityStatus: HostReachabilityStatus
     public var onConnect: @MainActor () -> Void
 
-    public init(profile: ConnectionProfile, onConnect: @escaping @MainActor () -> Void) {
+    public init(
+        profile: ConnectionProfile,
+        reachabilityStatus: HostReachabilityStatus = .unknown,
+        onConnect: @escaping @MainActor () -> Void
+    ) {
         self.profile = profile
+        self.reachabilityStatus = reachabilityStatus
         self.onConnect = onConnect
     }
 
@@ -73,12 +141,18 @@ public struct ProfileInspectorView: View {
         VStack(spacing: 20) {
             Image(systemName: "macbook.and.iphone")
                 .font(.system(size: 64))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(reachabilityStatus == .offline ? Color.secondary : Color.accentColor)
 
-            Text(profile.name)
-                .font(.title.bold())
+            VStack(spacing: 6) {
+                Text(profile.name)
+                    .font(.title.bold())
+                ReachabilityStatusBadge(status: reachabilityStatus)
+            }
 
             VStack(alignment: .leading, spacing: 8) {
+                if reachabilityStatus != .unknown {
+                    detailRow("Status", value: reachabilityStatus.label)
+                }
                 detailRow("Host Address", value: "\(profile.host):\(String(profile.port))")
                 detailRow("Authentication", value: profile.authMethod.displayName)
                 if !profile.username.isEmpty {

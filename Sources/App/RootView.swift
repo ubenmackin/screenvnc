@@ -17,6 +17,7 @@ extension [DiscoveredHost] {
 public struct RootView: View {
     private var profileStore = ProfileStore.shared
     private var discoveryService = BonjourDiscoveryService.shared
+    private var reachabilityService = HostReachabilityService.shared
     private var settings = SettingsStore.shared
     @Bindable private var cloudSync = CloudSyncCoordinator.shared
     private let logger = Logger(subsystem: "com.volcrypt.ScreenVNC", category: "RootView")
@@ -83,9 +84,13 @@ public struct RootView: View {
             await cloudSync.scanForExistingCloudProfilesOnLaunch()
         }
         .onAppear {
+            reachabilityService.startMonitoring(profiles: profileStore.profiles)
             if settings.autoDiscoverBonjour {
                 discoveryService.startDiscovery()
             }
+        }
+        .onChange(of: profileStore.profiles) { _, newProfiles in
+            reachabilityService.refreshAll(profiles: newProfiles)
         }
         .onChange(of: settings.autoDiscoverBonjour) { _, isEnabled in
             if isEnabled {
@@ -102,6 +107,9 @@ public struct RootView: View {
             List {
                 connectionListContent
             }
+            .refreshable {
+                reachabilityService.refreshAll(profiles: profileStore.profiles)
+            }
             .navigationTitle("ScreenVNC")
             .toolbar {
                 connectionListToolbar
@@ -115,13 +123,19 @@ public struct RootView: View {
             List(selection: $selectedProfile) {
                 connectionListContent
             }
+            .refreshable {
+                reachabilityService.refreshAll(profiles: profileStore.profiles)
+            }
             .navigationTitle("ScreenVNC")
             .toolbar {
                 connectionListToolbar
             }
         } detail: {
             if let selected = selectedProfile {
-                ProfileInspectorView(profile: selected) {
+                ProfileInspectorView(
+                    profile: selected,
+                    reachabilityStatus: reachabilityService.status(for: selected.id)
+                ) {
                     startConnection(selected)
                 }
             } else {
@@ -248,6 +262,7 @@ public struct RootView: View {
     private func profileRow(_ profile: ConnectionProfile) -> some View {
         ProfileRowView(
             profile: profile,
+            reachabilityStatus: reachabilityService.status(for: profile.id),
             onConnect: { startConnection(profile) },
             onEdit: { profileToEdit = profile },
             onToggleFavorite: { profileStore.toggleFavorite(for: profile.id) },
@@ -290,7 +305,7 @@ public struct RootView: View {
             name: host.name,
             host: host.host,
             port: host.port,
-            authMethod: .vncDES,
+            authMethod: .appleDH,
             displayPreference: settings.defaultDisplayPreference,
             qualityPreference: settings.defaultQualityPreference,
             pointerMode: settings.defaultPointerMode
