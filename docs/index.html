@@ -1,79 +1,146 @@
-<!-- Docs — ScreenVNC support page structure. -->
+<!-- Docs — ScreenVNC support site structure. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>ScreenVNC Support</title>
-  <meta name="description" content="ScreenVNC support: Mac-first VNC viewing for macOS Screen Sharing with adaptive layout and on-device privacy.">
+  <title>ScreenVNC — Your Mac on iPhone and iPad</title>
+  <meta name="description" content="ScreenVNC brings your Mac to iPhone and iPad over your local network or VPN: automatic Mac discovery, saved profiles, natural touch controls, and on-device privacy.">
+  <meta property="og:title" content="ScreenVNC — Your Mac on iPhone and iPad">
+  <meta property="og:description" content="ScreenVNC brings your Mac to iPhone and iPad over your local network or VPN: automatic Mac discovery, saved profiles, natural touch controls, and on-device privacy.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="./assets/screenshots/connections-iphone.png">
   <link rel="stylesheet" href="./assets/styles.css">
 </head>
 <body>
   <header>
     <p>ScreenVNC</p>
-    <nav aria-label="Support sections">
-      <a href="#features">Features</a>
-      <a href="#screenshots">Screenshots</a>
-      <a href="#support">Support</a>
+    <nav aria-label="Site sections">
+      <a href="#setup">Setup</a>
+      <a href="#tour">Tour</a>
+      <a href="#gestures">Gestures</a>
+      <a href="#requirements">Requirements</a>
       <a href="#privacy">Privacy</a>
+      <a href="#support">Support</a>
     </nav>
   </header>
   <main>
-    <section class="hero" aria-labelledby="hero-heading">
-      <h1 id="hero-heading">ScreenVNC Support</h1>
-      <p>ScreenVNC is a Mac-first VNC viewer for macOS Screen Sharing, with an RFB roadmap covering negotiated versions, security types, and encodings, plus adaptive layout for portrait and landscape.</p>
+    <section aria-labelledby="hero-heading">
+      <h1 id="hero-heading">Your Mac, on your iPhone and iPad.</h1>
+      <p>ScreenVNC is a Mac-first VNC viewer for macOS Screen Sharing. Connect over your local network or a VPN and see your desktop right on your device, then take control with natural touch gestures and a full keyboard.</p>
+      <p><a href="#setup">How to connect</a></p>
+      <p><a href="https://github.com/ubenmackin/screenvnc/issues">Get help on GitHub</a></p>
     </section>
-    <section id="features" aria-labelledby="features-heading">
-      <h2 id="features-heading">Features</h2>
-      <div class="feature-grid">
-        <article>
-          <h3>Transient chrome</h3>
-          <p>Controls step aside while you work and return the moment you scroll back.</p>
-        </article>
-        <article>
-          <h3>Adaptive layout</h3>
-          <p>Portrait shows a single-column connection list, connect action, then a fitted desktop with a collapsible input bar; landscape pairs the desktop canvas with a slim accessory strip, reflowing on traits and safe area.</p>
-        </article>
-        <article>
-          <h3>Fast VNC rendering</h3>
-          <p>Low-latency frame updates with adaptive quality for smooth remote interaction.</p>
-        </article>
-        <article>
-          <h3>Connections and input</h3>
-          <p>Saved connections, secure input, and trackpad-style gestures for remote control.</p>
-        </article>
-        <article>
-          <h3>Connection profiles and saved hosts</h3>
-          <p>Save connection profiles with validation, reconnect to recent hosts, and keep display options per host.</p>
-        </article>
-        <article>
-          <h3>Validated profiles and display prefs</h3>
-          <p>Connection profiles validate host, port, and credentials once, with per-host display preferences and diagnostics.</p>
-        </article>
-      </div>
+    <section id="setup" aria-labelledby="setup-heading">
+      <h2 id="setup-heading">Setup</h2>
+      <ol>
+        <li>On your Mac, open System Settings, go to General, then Sharing, and turn on Screen Sharing.</li>
+        <li>Install ScreenVNC on your iPhone or iPad, then pick your Mac — nearby Macs appear automatically.</li>
+        <li>Sign in with the same Mac username and password you use every day, and take control.</li>
+      </ol>
     </section>
-    <section id="screenshots" aria-labelledby="screenshots-heading">
-      <h2 id="screenshots-heading">Screenshots</h2>
-      <p>App screenshots will appear here once UI capture lands; this page links only committed assets.</p>
+    <section id="tour" aria-labelledby="tour-heading">
+      <h2 id="tour-heading">Tour</h2>
+      <h3>Connections</h3>
+      <p>Browse discovered Macs, favorites, and saved connections in one list.</p>
+      <figure>
+        <img src="./assets/screenshots/connections-iphone.png" alt="ScreenVNC connections list showing a discovered Mac, favorites, and saved connections">
+        <figcaption>Your Macs: discovered hosts, favorites, and saved connections.</figcaption>
+      </figure>
+      <h3>New connection</h3>
+      <p>Save each Mac as a profile with its own display settings.</p>
+      <figure>
+        <img src="./assets/screenshots/new-connection-iphone.png" alt="New Mac connection form with host details, authentication, and display options">
+        <figcaption>Save each Mac as a profile with its own display settings.</figcaption>
+      </figure>
+      <h3>In session</h3>
+      <p>Connect to your desktop with keyboard, pointer, and modifiers close at hand.</p>
+      <figure>
+        <img src="./assets/screenshots/connecting-iphone.png" alt="Connecting to a Mac desktop with the session toolbar visible">
+        <figcaption>Connecting to a Mac desktop; the toolbar keeps keyboard, pointer, and modifiers close.</figcaption>
+      </figure>
+      <h3>Settings</h3>
+      <p>Tune display mode, quality, mouse mode, and gestures in one place.</p>
+      <figure>
+        <img src="./assets/screenshots/settings-iphone.png" alt="Viewer settings for display mode, quality, mouse mode, and gestures">
+        <figcaption>Viewer defaults, gestures, and Face ID live in Settings.</figcaption>
+      </figure>
+      <p>On iPad, connections become a sidebar next to the detail view.</p>
+      <figure>
+        <img src="./assets/screenshots/connections-ipad.png" alt="ScreenVNC on iPad showing the connections sidebar">
+        <figcaption>iPad layout: connections in a sidebar.</figcaption>
+      </figure>
+    </section>
+    <section id="gestures" aria-labelledby="gestures-heading">
+      <h2 id="gestures-heading">Gestures</h2>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Gesture</th>
+            <th scope="col">What it does</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Tap</td>
+            <td>Click</td>
+          </tr>
+          <tr>
+            <td>Long-press</td>
+            <td>Right-click</td>
+          </tr>
+          <tr>
+            <td>Two-finger drag</td>
+            <td>Scroll</td>
+          </tr>
+          <tr>
+            <td>Drag</td>
+            <td>Move the pointer</td>
+          </tr>
+          <tr>
+            <td>Pinch</td>
+            <td>Zoom in and out</td>
+          </tr>
+          <tr>
+            <td>Keyboard bar</td>
+            <td>Type plus Command, Option, and Control</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <section id="requirements" aria-labelledby="requirements-heading">
+      <h2 id="requirements-heading">Requirements</h2>
+      <ul>
+        <li>A Mac with Screen Sharing enabled.</li>
+        <li>An iPhone or iPad.</li>
+        <li>Both devices on the same network, or connected through a VPN while you are away.</li>
+      </ul>
+    </section>
+    <section id="privacy" aria-labelledby="privacy-heading">
+      <h2 id="privacy-heading">Privacy</h2>
+      <ul>
+        <li>Credentials stay on your device and are never uploaded.</li>
+        <li>No tracking, no analytics, and no account required.</li>
+        <li>Saved profiles are a JSON file in Application Support, optionally backed up through your own iCloud account.</li>
+        <li>iCloud profile backups carry settings only, never passwords.</li>
+      </ul>
+      <p><a href="https://github.com/ubenmackin/screenvnc/blob/main/PRIVACY_POLICY.md">Read the full privacy policy</a></p>
+      <p>Questions about privacy? Ask via <a href="https://github.com/ubenmackin/screenvnc/issues">GitHub issues</a>.</p>
     </section>
     <section id="support" aria-labelledby="support-heading">
       <h2 id="support-heading">Support</h2>
       <ol>
         <li>Describe what you were doing and what you expected to see.</li>
-        <li>Note your device, iOS version, and orientation or size class (portrait or landscape).</li>
+        <li>Note your device, iOS version, and orientation (portrait or landscape).</li>
         <li>Open a GitHub issue with those details so we can reproduce it.</li>
       </ol>
-      <p><a href="https://github.com/ubenmackin/screenvnc/issues" target="_blank" rel="noopener" aria-label="Report a ScreenVNC issue on GitHub">Report an issue on GitHub</a></p>
-    </section>
-    <section id="privacy" aria-labelledby="privacy-heading">
-      <h2 id="privacy-heading">Privacy</h2>
-      <p>Your connection profiles and per-host display preferences stay on your device with zero tracking: profiles are saved as a JSON file in Application Support (optionally backed up through your own iCloud account when iCloud is enabled), display preferences live in per-host defaults, and passwords are kept device-only in your Keychain, where they never sync anywhere. For privacy questions, please ask via <a href="https://github.com/ubenmackin/screenvnc/issues" target="_blank" rel="noopener" aria-label="Ask a ScreenVNC privacy question on GitHub">GitHub issues</a>.</p>
+      <p><a href="https://github.com/ubenmackin/screenvnc/issues">Report an issue on GitHub</a></p>
     </section>
   </main>
   <footer>
     <p>Copyright 2026 ScreenVNC. All rights reserved.</p>
-    <p><a href="https://github.com/ubenmackin/screenvnc/issues" target="_blank" rel="noopener" aria-label="Visit ScreenVNC GitHub issues">GitHub issues</a></p>
+    <p><a href="https://github.com/ubenmackin/screenvnc/issues">GitHub issues</a></p>
   </footer>
 </body>
 </html>
