@@ -28,6 +28,7 @@ public struct EditProfileView: View {
     @State private var pointerMode: PointerMode = .directTouch
     @State private var isFavorite: Bool = false
     @State private var requiresBiometrics: Bool = false
+    @State private var allowUnencryptedSession: Bool = false
     @State private var validationError: String?
 
     public init(
@@ -43,13 +44,17 @@ public struct EditProfileView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                Section("Host Details") {
+                Section {
                     TextField("Name (e.g. Mac Studio)", text: $name)
                     TextField("Host or IP (e.g. macbook.local)", text: $host)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     TextField("Port", text: $portString)
                         .keyboardType(.numberPad)
+                } header: {
+                    Text("Host Details")
+                } footer: {
+                    Text("Bonjour (.local) names only resolve on the same local Wi-Fi/LAN. For VPN or remote connections, use the Mac's LAN or VPN IP address.")
                 }
 
                 Section("Authentication (macOS Screen Sharing)") {
@@ -73,6 +78,12 @@ public struct EditProfileView: View {
                         .onChange(of: password) {
                             hasEditedPassword = true
                         }
+                    }
+
+                    if authMethod == .vncDES,
+                       !ConnectionProfile.isLoopbackHost(host.trimmingCharacters(in: .whitespacesAndNewlines))
+                    {
+                        Toggle("Always Allow Unencrypted Session", isOn: $allowUnencryptedSession)
                     }
                 }
 
@@ -165,6 +176,7 @@ public struct EditProfileView: View {
             pointerMode = existingProfile.pointerMode ?? SettingsStore.shared.defaultPointerMode
             isFavorite = existingProfile.isFavorite
             requiresBiometrics = existingProfile.requiresBiometrics
+            allowUnencryptedSession = existingProfile.allowUnencryptedSession
             // Presence-only probe; the secret itself stays in the Keychain until
             // the user opts to replace it. Blank field plus placeholder hides that.
             hasSavedPassword = KeychainManager.shared.hasPassword(for: existingProfile.id)
@@ -173,7 +185,8 @@ public struct EditProfileView: View {
             displayPreference = settings.defaultDisplayPreference
             qualityPreference = settings.defaultQualityPreference
             pointerMode = settings.defaultPointerMode
-            authMethod = .vncDES
+            authMethod = .appleDH
+            allowUnencryptedSession = false
         }
     }
 
@@ -198,8 +211,11 @@ public struct EditProfileView: View {
             displayPreference: displayPreference,
             qualityPreference: qualityPreference,
             pointerMode: pointerMode,
+            macAddress: profileToEdit?.macAddress,
             isFavorite: isFavorite,
-            requiresBiometrics: requiresBiometrics
+            requiresBiometrics: requiresBiometrics,
+            allowUnencryptedSession: authMethod == .vncDES ? allowUnencryptedSession : false,
+            lastConnectedDate: profileToEdit?.lastConnectedDate
         )
 
         do {

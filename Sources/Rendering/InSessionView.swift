@@ -257,7 +257,7 @@ public struct InSessionView: View {
     public var onDismiss: @MainActor () -> Void
 
     @State private var framebuffer = Framebuffer()
-    private let client = VNCClient()
+    @State private var client = VNCClient()
     @State private var inputPipeline = VNCInputPipeline()
     @State private var sessionBridge: SessionClientBridge?
     private var settings = SettingsStore.shared
@@ -347,10 +347,18 @@ public struct InSessionView: View {
             "Unencrypted Connection",
             isPresented: $isAwaitingPlaintextConsent
         ) {
-            Button("Continue Unencrypted", role: .destructive) {
-                // Retained handle: onDisappear cancellation unwinds the group into
-                // run(), whose defer finishes the pipeline stream.
-                sessionTask = Task { await runSessionTasks() }
+            Button("Always Allow", role: .destructive) {
+                var updated = profile
+                updated.allowUnencryptedSession = true
+                ProfileStore.shared.save(updated)
+                sessionTask = Task {
+                    await startSessionAfterConsentDismissal()
+                }
+            }
+            Button("Continue Once") {
+                sessionTask = Task {
+                    await startSessionAfterConsentDismissal()
+                }
             }
             Button("Cancel", role: .cancel) {
                 onDismiss()
@@ -643,6 +651,17 @@ public struct InSessionView: View {
         }
     }
 
+    /// Waits for UIKit to finish dismissing the consent alert before dialing so any
+    /// immediate connection failure alert is never dropped during transition.
+    private func startSessionAfterConsentDismissal() async {
+        do {
+            try await Task.sleep(for: .milliseconds(350))
+        } catch {
+            return
+        }
+        await runSessionTasks()
+    }
+
     /// Runs the input pipeline and session dial concurrently, exactly as the prior `.task` group did.
     private func runSessionTasks() async {
         await withTaskGroup(of: Void.self) { group in
@@ -689,7 +708,11 @@ public struct InSessionView: View {
         do {
             try await client.connect(profile: profile, password: password)
             ProfileStore.shared.updateLastConnected(for: profile.id)
+            HostReachabilityService.shared.recordStatus(.online, for: profile.id)
+        } catch is CancellationError {
+            return
         } catch {
+            HostReachabilityService.shared.recordStatus(.offline, for: profile.id)
             errorMessage = error.localizedDescription
         }
     }

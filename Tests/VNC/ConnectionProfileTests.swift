@@ -71,5 +71,41 @@ final class ConnectionProfileTests: XCTestCase {
         XCTAssertEqual(original.authMethod, decoded.authMethod)
         XCTAssertEqual(original.isFavorite, decoded.isFavorite)
         XCTAssertEqual(original.requiresBiometrics, decoded.requiresBiometrics)
+        XCTAssertFalse(decoded.allowUnencryptedSession)
+    }
+
+    func testAllowUnencryptedSessionSuppressesPlaintextConsent() {
+        var profile = ConnectionProfile(
+            name: "MacBook Air",
+            host: "macbookair.local",
+            port: 5900,
+            authMethod: .vncDES
+        )
+        XCTAssertTrue(profile.requiresPlaintextConsent)
+
+        profile.allowUnencryptedSession = true
+        XCTAssertFalse(profile.requiresPlaintextConsent)
+    }
+
+    func testLegacyProfileJSONDecodesWithoutAllowUnencryptedKey() throws {
+        let legacyJSON = """
+        {
+            "id": "11111111-2222-3333-4444-555555555555",
+            "name": "Legacy Mac",
+            "host": "192.168.1.42",
+            "port": 5900,
+            "authMethod": "vncDES",
+            "username": "",
+            "displayPreference": "fit",
+            "qualityPreference": "adaptive",
+            "isFavorite": false,
+            "requiresBiometrics": false
+        }
+        """
+        let data = try XCTUnwrap(legacyJSON.data(using: .utf8))
+        let decoded = try JSONDecoder().decode(ConnectionProfile.self, from: data)
+        XCTAssertEqual(decoded.name, "Legacy Mac")
+        XCTAssertFalse(decoded.allowUnencryptedSession)
+        XCTAssertTrue(decoded.requiresPlaintextConsent)
     }
 }

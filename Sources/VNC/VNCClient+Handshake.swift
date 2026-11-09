@@ -6,7 +6,11 @@ extension VNCClient {
     /// Handshakes version, negotiates security, and exchanges client/server initialization.
     func executeHandshake(profile: ConnectionProfile, password: String?) async throws {
         try await performVersionHandshake()
-        let selectedType = try await performSecurityNegotiation(preferred: profile.authMethod, host: profile.host)
+        let selectedType = try await performSecurityNegotiation(
+            preferred: profile.authMethod,
+            username: profile.username,
+            host: profile.host
+        )
         try await authenticate(securityType: selectedType, profile: profile, password: password, host: profile.host)
         try await performServerInit()
         try await sendPixelFormat()
@@ -48,7 +52,11 @@ extension VNCClient {
         throw VNCAuthError.authenticationRejected("Unsupported RFB version.")
     }
 
-    private func performSecurityNegotiation(preferred: AuthMethod, host: String) async throws -> RFBConstants.SecurityType {
+    private func performSecurityNegotiation(
+        preferred: AuthMethod,
+        username: String,
+        host: String
+    ) async throws -> RFBConstants.SecurityType {
         await updateState(.authenticating)
         let numTypesData = try await readExact(1)
         guard let firstByte = numTypesData.first else {
@@ -69,7 +77,12 @@ extension VNCClient {
         }
 
         let securityTypes = try await readExact(numTypes)
-        let selectedType = try chooseSecurityType(from: securityTypes, preferred: preferred, host: host)
+        let selectedType = try chooseSecurityType(
+            from: securityTypes,
+            preferred: preferred,
+            username: username,
+            host: host
+        )
         try await sendExact(Data([selectedType.rawValue]))
         return selectedType
     }
@@ -184,10 +197,11 @@ extension VNCClient {
     }
 
     /// Enforces the profile's preferred security type; absent support fails closed
-    /// instead of silently downgrading to a weaker type.
-    private func chooseSecurityType(
+    /// instead of silently downgrading to a weaker type (though upgrading VNC-DES to Apple DH is permitted when a username is provided).
+    func chooseSecurityType(
         from serverTypes: Data,
         preferred: AuthMethod,
+        username: String = "",
         host: String
     ) throws -> RFBConstants.SecurityType {
         let types = Set(serverTypes.map(\.self))
@@ -198,11 +212,19 @@ extension VNCClient {
             }
             return .appleDH
         case .vncDES:
-            // VNC-DES challenge response is offline-crackable; never accept it unsolicited.
-            guard types.contains(RFBConstants.SecurityType.vncAuth.rawValue) else {
-                throw VNCAuthError.authenticationRejected("Server does not offer the required VNC password security; refusing a weaker fallback.")
+            if types.contains(RFBConstants.SecurityType.vncAuth.rawValue) {
+                return .vncAuth
             }
-            return .vncAuth
+            if types.contains(RFBConstants.SecurityType.appleDH.rawValue) {
+                let hasUser = !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if hasUser {
+                    return .appleDH
+                }
+                throw VNCAuthError.authenticationRejected(
+                    "Mac requires macOS User (Apple DH) login. Edit this profile to select 'macOS User (Apple DH)' or enable VNC Password in macOS Screen Sharing settings."
+                )
+            }
+            throw VNCAuthError.authenticationRejected("Server does not offer the required VNC password security; refusing a weaker fallback.")
         case .none:
             // None stays loopback-only and must be the profile's own choice, never a fallback.
             guard types.contains(RFBConstants.SecurityType.none.rawValue), isLoopbackHost(host) else {

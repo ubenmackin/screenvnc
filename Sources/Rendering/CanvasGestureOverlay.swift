@@ -156,11 +156,11 @@ public struct CanvasGestureOverlay: UIViewRepresentable {
             let tap1 = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
             tap1.numberOfTouchesRequired = 1
             tap1.numberOfTapsRequired = 1
-            tap1.buttonMaskRequired = .primary
             tap1.delegate = self
 
             let secondaryTap = UITapGestureRecognizer(target: self, action: #selector(handleSecondaryMouseTap(_:)))
             secondaryTap.numberOfTouchesRequired = 1
+            secondaryTap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
             secondaryTap.buttonMaskRequired = .secondary
             secondaryTap.delegate = self
 
