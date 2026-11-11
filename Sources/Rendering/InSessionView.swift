@@ -557,7 +557,8 @@ public struct InSessionView: View {
                         onPointerScroll: handleTabletopScroll,
                         onKeyPress: handleKeyPress,
                         onSendShortcut: handleShortcut,
-                        isInputDisabled: settings.viewOnly
+                        isInputDisabled: settings.viewOnly,
+                        onGestureBegan: handleTabletopGestureBegan
                     )
                     .frame(height: geometry.size.height * 0.5)
                 }
@@ -821,11 +822,16 @@ public struct InSessionView: View {
         inputPipeline.enqueue(.click(posX: Int(sharedCursor.x), posY: Int(sharedCursor.y), buttonMask: buttonMask))
     }
 
-    private func handleTabletopScroll(delta: CGSize) {
+    private func handleTabletopGestureBegan() {
+        tabletopScrollAccumulator.reset()
+    }
+
+    private func handleTabletopScroll(delta: CGSize, velocity: CGPoint) {
         guard !settings.viewOnly else { return }
         let steps = tabletopScrollAccumulator.consume(
             deltaX: delta.width,
             deltaY: delta.height,
+            velocity: velocity,
             naturalScrolling: settings.naturalScrolling
         )
         guard steps.stepsX != 0 || steps.stepsY != 0 else { return }

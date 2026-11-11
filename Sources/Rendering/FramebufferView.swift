@@ -278,6 +278,7 @@ public struct FramebufferView: View {
                 handleDragEnd(at: viewPoint, in: viewSize)
             },
             onViewportPanStart: {
+                scrollAccumulator.reset()
                 inertiaTask?.cancel()
                 inertiaTask = nil
             },
@@ -295,8 +296,8 @@ public struct FramebufferView: View {
                     in: viewSize
                 )
             },
-            onTwoFingerScroll: { delta, viewPoint in
-                handleScroll(delta: delta, at: viewPoint, in: viewSize)
+            onTwoFingerScroll: { delta, viewPoint, velocity in
+                handleScroll(delta: delta, at: viewPoint, velocity: velocity, in: viewSize)
             },
             onHoverMove: { viewPoint in
                 handleHoverMove(to: viewPoint, in: viewSize)
@@ -417,11 +418,12 @@ public struct FramebufferView: View {
         }
     }
 
-    private func handleScroll(delta: CGSize, at viewPoint: CGPoint, in viewSize: CGSize) {
+    private func handleScroll(delta: CGSize, at viewPoint: CGPoint, velocity: CGPoint, in viewSize: CGSize) {
         guard !isInputDisabled else { return }
         let steps = scrollAccumulator.consume(
             deltaX: delta.width,
             deltaY: delta.height,
+            velocity: velocity,
             naturalScrolling: settings.naturalScrolling
         )
         guard steps.stepsX != 0 || steps.stepsY != 0 else { return }
@@ -624,12 +626,12 @@ public struct FramebufferView: View {
 
     private func emitFallbackScroll(posX: Int, posY: Int, stepsX: Int, stepsY: Int) {
         let vButton = stepsY > 0 ? RFBConstants.PointerButton.scrollUp.rawValue : RFBConstants.PointerButton.scrollDown.rawValue
-        for _ in 0 ..< min(abs(stepsY), 6) {
+        for _ in 0 ..< min(abs(stepsY), 12) {
             onPointerEvent(posX, posY, vButton)
             onPointerEvent(posX, posY, 0)
         }
         let hButton = stepsX > 0 ? RFBConstants.PointerButton.scrollLeft.rawValue : RFBConstants.PointerButton.scrollRight.rawValue
-        for _ in 0 ..< min(abs(stepsX), 6) {
+        for _ in 0 ..< min(abs(stepsX), 12) {
             onPointerEvent(posX, posY, hButton)
             onPointerEvent(posX, posY, 0)
         }

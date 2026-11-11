@@ -5,10 +5,11 @@ public struct TabletopConsoleView: View {
     @Binding public var activeModifiers: Set<MacKey>
     public var onPointerDelta: @MainActor (CGFloat, CGFloat, UInt8) -> Void
     public var onPointerClick: @MainActor (UInt8) -> Void
-    public var onPointerScroll: (@MainActor (CGSize) -> Void)?
+    public var onPointerScroll: (@MainActor (CGSize, CGPoint) -> Void)?
     public var onKeyPress: @MainActor (UInt32, Bool) -> Void
     public var onSendShortcut: @MainActor (String) -> Void
     public var isInputDisabled: Bool = false
+    public var onGestureBegan: (@MainActor () -> Void)?
 
     @State private var isTapDragging = false
 
@@ -16,10 +17,11 @@ public struct TabletopConsoleView: View {
         activeModifiers: Binding<Set<MacKey>>,
         onPointerDelta: @escaping @MainActor (CGFloat, CGFloat, UInt8) -> Void,
         onPointerClick: @escaping @MainActor (UInt8) -> Void,
-        onPointerScroll: (@MainActor (CGSize) -> Void)? = nil,
+        onPointerScroll: (@MainActor (CGSize, CGPoint) -> Void)? = nil,
         onKeyPress: @escaping @MainActor (UInt32, Bool) -> Void,
         onSendShortcut: @escaping @MainActor (String) -> Void,
-        isInputDisabled: Bool = false
+        isInputDisabled: Bool = false,
+        onGestureBegan: (@MainActor () -> Void)? = nil
     ) {
         _activeModifiers = activeModifiers
         self.onPointerDelta = onPointerDelta
@@ -28,6 +30,7 @@ public struct TabletopConsoleView: View {
         self.onKeyPress = onKeyPress
         self.onSendShortcut = onSendShortcut
         self.isInputDisabled = isInputDisabled
+        self.onGestureBegan = onGestureBegan
     }
 
     public var body: some View {
@@ -114,12 +117,14 @@ public struct TabletopConsoleView: View {
                             isTapDragging = false
                             onPointerDelta(0, 0, 0)
                         },
-                        onViewportPanStart: {},
+                        onViewportPanStart: {
+                            onGestureBegan?()
+                        },
                         onViewportPan: { _ in },
                         onViewportPanEnd: { _ in },
                         onPinchZoom: { _, _, _ in },
-                        onTwoFingerScroll: { delta, _ in
-                            onPointerScroll?(delta)
+                        onTwoFingerScroll: { delta, _, velocity in
+                            onPointerScroll?(delta, velocity)
                         },
                         onHoverMove: { _ in }
                     )

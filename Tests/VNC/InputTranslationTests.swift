@@ -187,12 +187,33 @@ final class InputTranslationTests: XCTestCase {
     }
 
     func testScrollAccumulatorNaturalAndClassicDirections() {
-        var natural = ScrollAccumulator(stepThreshold: 18)
+        var natural = ScrollAccumulator()
         // Swiping fingers up (negative deltaY) with Natural Scrolling emits RFB scrollUp (positive stepsY).
-        XCTAssertEqual(natural.consume(deltaX: 0, deltaY: -10, naturalScrolling: true).stepsY, 0)
-        XCTAssertEqual(natural.consume(deltaX: 0, deltaY: -10, naturalScrolling: true).stepsY, 1)
+        XCTAssertEqual(natural.consume(deltaX: 0, deltaY: -5, velocity: .zero, naturalScrolling: true).stepsY, 0)
+        XCTAssertEqual(natural.consume(deltaX: 0, deltaY: -5, velocity: .zero, naturalScrolling: true).stepsY, 1)
 
-        var classic = ScrollAccumulator(stepThreshold: 18)
-        XCTAssertEqual(classic.consume(deltaX: 0, deltaY: -20, naturalScrolling: false).stepsY, -1)
+        var classic = ScrollAccumulator()
+        XCTAssertEqual(classic.consume(deltaX: 0, deltaY: -10, velocity: .zero, naturalScrolling: false).stepsY, -1)
+    }
+
+    func testScrollAccumulatorVelocityGain() {
+        var slow = ScrollAccumulator()
+        XCTAssertEqual(slow.consume(deltaX: 0, deltaY: 10, velocity: .zero, naturalScrolling: false).stepsY, 1)
+
+        var fast = ScrollAccumulator()
+        // Fast flick amplifies the same travel into an extra step.
+        XCTAssertEqual(fast.consume(deltaX: 0, deltaY: 10, velocity: CGPoint(x: 0, y: 900), naturalScrolling: false).stepsY, 2)
+    }
+
+    func testScrollAccumulatorReset() {
+        var accumulator = ScrollAccumulator()
+        XCTAssertEqual(accumulator.consume(deltaX: 0, deltaY: 5, velocity: .zero, naturalScrolling: false).stepsY, 0)
+
+        accumulator.reset()
+        XCTAssertEqual(accumulator.remainderX, 0, accuracy: 0.0001)
+        XCTAssertEqual(accumulator.remainderY, 0, accuracy: 0.0001)
+
+        // Without the reset above, this second sub-threshold push would cross the threshold.
+        XCTAssertEqual(accumulator.consume(deltaX: 0, deltaY: 5, velocity: .zero, naturalScrolling: false).stepsY, 0)
     }
 }
