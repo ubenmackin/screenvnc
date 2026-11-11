@@ -29,7 +29,7 @@ public struct CanvasGestureCallbacks {
     public var onViewportPan: @MainActor (CGSize) -> Void
     public var onViewportPanEnd: @MainActor (CGPoint) -> Void
     public var onPinchZoom: @MainActor (CGFloat, CGPoint, CGSize) -> Void
-    public var onTwoFingerScroll: @MainActor (CGSize, CGPoint) -> Void
+    public var onTwoFingerScroll: @MainActor (CGSize, CGPoint, CGPoint) -> Void
     public var onHoverMove: @MainActor (CGPoint) -> Void
 
     public init(
@@ -45,7 +45,7 @@ public struct CanvasGestureCallbacks {
         onViewportPan: @escaping @MainActor (CGSize) -> Void,
         onViewportPanEnd: @escaping @MainActor (CGPoint) -> Void,
         onPinchZoom: @escaping @MainActor (CGFloat, CGPoint, CGSize) -> Void,
-        onTwoFingerScroll: @escaping @MainActor (CGSize, CGPoint) -> Void,
+        onTwoFingerScroll: @escaping @MainActor (CGSize, CGPoint, CGPoint) -> Void,
         onHoverMove: @escaping @MainActor (CGPoint) -> Void
     ) {
         self.onPrimaryTap = onPrimaryTap
@@ -417,7 +417,7 @@ public struct CanvasGestureOverlay: UIViewRepresentable {
                 if twoFingerMode == .undecided {
                     let travel = hypot(translation.x, translation.y)
                     let pinchDelta = abs((pinchRecognizer?.scale ?? 1.0) - 1.0)
-                    if travel >= 10, pinchDelta < 0.08 {
+                    if travel >= 6, pinchDelta < 0.10 {
                         twoFingerMode = .scrolling
                     } else {
                         return
@@ -429,7 +429,7 @@ public struct CanvasGestureOverlay: UIViewRepresentable {
                 {
                     callbacks.onViewportPan(delta)
                 } else if !configuration.isInputDisabled {
-                    callbacks.onTwoFingerScroll(delta, location)
+                    callbacks.onTwoFingerScroll(delta, location, velocity)
                 }
 
             case .ended, .cancelled, .failed:
@@ -535,6 +535,7 @@ public struct CanvasGestureOverlay: UIViewRepresentable {
             guard !configuration.isInputDisabled, let view = gesture.view else { return }
             let translation = gesture.translation(in: view)
             let location = gesture.location(in: view)
+            let velocity = gesture.velocity(in: view)
 
             switch gesture.state {
             case .began:
@@ -545,7 +546,7 @@ public struct CanvasGestureOverlay: UIViewRepresentable {
                     height: translation.y - lastIndirectScrollTranslation.y
                 )
                 lastIndirectScrollTranslation = translation
-                callbacks.onTwoFingerScroll(delta, location)
+                callbacks.onTwoFingerScroll(delta, location, velocity)
             case .ended, .cancelled, .failed:
                 lastIndirectScrollTranslation = .zero
             default:

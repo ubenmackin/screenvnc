@@ -263,7 +263,7 @@ public struct ScrollAccumulator: Sendable {
     public var remainderY: CGFloat = 0
     public let stepThreshold: CGFloat
 
-    public init(stepThreshold: CGFloat = 18.0) {
+    public init(stepThreshold: CGFloat = 8.0) {
         self.stepThreshold = max(1.0, stepThreshold)
     }
 
@@ -274,9 +274,18 @@ public struct ScrollAccumulator: Sendable {
 
     /// Returns signed wheel steps (positive = RFB scrollUp/scrollLeft) for an incremental drag delta.
     public mutating func consume(deltaX: CGFloat, deltaY: CGFloat, naturalScrolling: Bool) -> (stepsX: Int, stepsY: Int) {
+        consume(deltaX: deltaX, deltaY: deltaY, velocity: .zero, naturalScrolling: naturalScrolling)
+    }
+
+    /// Scales the delta by finger speed before accumulating into discrete steps.
+    public mutating func consume(deltaX: CGFloat, deltaY: CGFloat, velocity: CGPoint, naturalScrolling: Bool) -> (stepsX: Int, stepsY: Int) {
+        let speed = hypot(velocity.x, velocity.y)
+        // Slow drags stay precise; fast flings gain up to ~2.2x for fewer swipes.
+        let normalizedSpeed = min(max((speed - 80.0) / 850.0, 0.0), 1.0)
+        let gain = 0.85 + normalizedSpeed * 1.35
         let sign: CGFloat = naturalScrolling ? -1.0 : 1.0
-        remainderX += deltaX * sign
-        remainderY += deltaY * sign
+        remainderX += deltaX * gain * sign
+        remainderY += deltaY * gain * sign
 
         let stepsX = Int(remainderX / stepThreshold)
         let stepsY = Int(remainderY / stepThreshold)
