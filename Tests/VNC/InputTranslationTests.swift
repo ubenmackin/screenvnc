@@ -189,31 +189,72 @@ final class InputTranslationTests: XCTestCase {
     func testScrollAccumulatorNaturalAndClassicDirections() {
         var natural = ScrollAccumulator()
         // Swiping fingers up (negative deltaY) with Natural Scrolling emits RFB scrollUp (positive stepsY).
-        XCTAssertEqual(natural.consume(deltaX: 0, deltaY: -5, velocity: .zero, naturalScrolling: true).stepsY, 0)
-        XCTAssertEqual(natural.consume(deltaX: 0, deltaY: -5, velocity: .zero, naturalScrolling: true).stepsY, 1)
+        XCTAssertEqual(natural.consume(deltaX: 0, deltaY: -4, velocity: .zero, naturalScrolling: true).stepsY, 1)
 
         var classic = ScrollAccumulator()
-        XCTAssertEqual(classic.consume(deltaX: 0, deltaY: -10, velocity: .zero, naturalScrolling: false).stepsY, -1)
+        XCTAssertEqual(classic.consume(deltaX: 0, deltaY: -4, velocity: .zero, naturalScrolling: false).stepsY, -1)
     }
 
     func testScrollAccumulatorVelocityGain() {
         var slow = ScrollAccumulator()
-        XCTAssertEqual(slow.consume(deltaX: 0, deltaY: 10, velocity: .zero, naturalScrolling: false).stepsY, 1)
+        XCTAssertEqual(slow.consume(deltaX: 0, deltaY: 12, velocity: .zero, naturalScrolling: false).stepsY, 3)
 
         var fast = ScrollAccumulator()
-        // Fast flick amplifies the same travel into an extra step.
-        XCTAssertEqual(fast.consume(deltaX: 0, deltaY: 10, velocity: CGPoint(x: 0, y: 900), naturalScrolling: false).stepsY, 2)
+        // Same travel at fling speed gains near 3x into extra steps.
+        XCTAssertEqual(fast.consume(deltaX: 0, deltaY: 12, velocity: CGPoint(x: 0, y: 900), naturalScrolling: false).stepsY, 8)
+    }
+
+    func testScrollAccumulatorCoastDecay() {
+        var fast = ScrollAccumulator()
+        let lift = CGPoint(x: 0, y: 900)
+        var total = 0
+        for tick in 0 ..< 8 {
+            let decay = pow(0.85, Double(tick))
+            let delta = lift.y * 0.016 * CGFloat(decay)
+            total += fast.consume(deltaX: 0, deltaY: delta, naturalScrolling: false).stepsY
+        }
+        XCTAssertGreaterThan(total, 12)
+
+        // Sub-threshold lifts never start coast.
+        XCTAssertFalse(ScrollAccumulator.shouldCoast(velocity: CGPoint(x: 0, y: 250)))
+        XCTAssertFalse(ScrollAccumulator.shouldCoast(velocity: .zero))
+        XCTAssertTrue(ScrollAccumulator.shouldCoast(velocity: CGPoint(x: 0, y: 900)))
+        XCTAssertTrue(ScrollAccumulator.shouldCoast(velocity: CGPoint(x: 240, y: 240)))
+    }
+
+    func testShouldCoastThresholdMatchesScrollEndGate() {
+        // Boundary around the 300 pt/s lift gate used before arming coast.
+        XCTAssertFalse(ScrollAccumulator.shouldCoast(velocity: CGPoint(x: 300, y: 0)))
+        XCTAssertTrue(ScrollAccumulator.shouldCoast(velocity: CGPoint(x: 301, y: 0)))
+    }
+
+    func testCoastEmptyTicksStop() {
+        // Two straight sub-step ticks halt coast, matching the end handler loop.
+        var accumulator = ScrollAccumulator()
+        var emptyTicks = 0
+        for _ in 0 ..< 8 {
+            let steps = accumulator.consume(deltaX: 0, deltaY: 0.1, naturalScrolling: false)
+            if steps.stepsX == 0, steps.stepsY == 0 {
+                emptyTicks += 1
+                if emptyTicks >= 2 {
+                    break
+                }
+                continue
+            }
+            emptyTicks = 0
+        }
+        XCTAssertGreaterThanOrEqual(emptyTicks, 2)
     }
 
     func testScrollAccumulatorReset() {
         var accumulator = ScrollAccumulator()
-        XCTAssertEqual(accumulator.consume(deltaX: 0, deltaY: 5, velocity: .zero, naturalScrolling: false).stepsY, 0)
+        XCTAssertEqual(accumulator.consume(deltaX: 0, deltaY: 2, velocity: .zero, naturalScrolling: false).stepsY, 0)
 
         accumulator.reset()
         XCTAssertEqual(accumulator.remainderX, 0, accuracy: 0.0001)
         XCTAssertEqual(accumulator.remainderY, 0, accuracy: 0.0001)
 
         // Without the reset above, this second sub-threshold push would cross the threshold.
-        XCTAssertEqual(accumulator.consume(deltaX: 0, deltaY: 5, velocity: .zero, naturalScrolling: false).stepsY, 0)
+        XCTAssertEqual(accumulator.consume(deltaX: 0, deltaY: 2, velocity: .zero, naturalScrolling: false).stepsY, 0)
     }
 }

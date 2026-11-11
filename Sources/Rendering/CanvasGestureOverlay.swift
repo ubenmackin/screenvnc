@@ -30,6 +30,8 @@ public struct CanvasGestureCallbacks {
     public var onViewportPanEnd: @MainActor (CGPoint) -> Void
     public var onPinchZoom: @MainActor (CGFloat, CGPoint, CGSize) -> Void
     public var onTwoFingerScroll: @MainActor (CGSize, CGPoint, CGPoint) -> Void
+    public var onTwoFingerScrollEnd: (@MainActor (CGPoint) -> Void)?
+    public var onScrollStart: (@MainActor () -> Void)?
     public var onHoverMove: @MainActor (CGPoint) -> Void
 
     public init(
@@ -46,6 +48,8 @@ public struct CanvasGestureCallbacks {
         onViewportPanEnd: @escaping @MainActor (CGPoint) -> Void,
         onPinchZoom: @escaping @MainActor (CGFloat, CGPoint, CGSize) -> Void,
         onTwoFingerScroll: @escaping @MainActor (CGSize, CGPoint, CGPoint) -> Void,
+        onTwoFingerScrollEnd: (@MainActor (CGPoint) -> Void)? = nil,
+        onScrollStart: (@MainActor () -> Void)? = nil,
         onHoverMove: @escaping @MainActor (CGPoint) -> Void
     ) {
         self.onPrimaryTap = onPrimaryTap
@@ -61,6 +65,8 @@ public struct CanvasGestureCallbacks {
         self.onViewportPanEnd = onViewportPanEnd
         self.onPinchZoom = onPinchZoom
         self.onTwoFingerScroll = onTwoFingerScroll
+        self.onTwoFingerScrollEnd = onTwoFingerScrollEnd
+        self.onScrollStart = onScrollStart
         self.onHoverMove = onHoverMove
     }
 }
@@ -397,55 +403,84 @@ public struct CanvasGestureOverlay: UIViewRepresentable {
 
             switch gesture.state {
             case .began:
-                lastTwoFingerTranslation = .zero
-                callbacks.onViewportPanStart()
-                if twoFingerMode == .pinching {
-                    return
-                }
-                twoFingerMode = .undecided
-
+                beginTwoFingerPan()
             case .changed:
-                let delta = CGSize(
-                    width: translation.x - lastTwoFingerTranslation.x,
-                    height: translation.y - lastTwoFingerTranslation.y
-                )
-                lastTwoFingerTranslation = translation
-
-                if twoFingerMode == .pinching {
-                    return
-                }
-                if twoFingerMode == .undecided {
-                    let travel = hypot(translation.x, translation.y)
-                    let pinchDelta = abs((pinchRecognizer?.scale ?? 1.0) - 1.0)
-                    if travel >= 6, pinchDelta < 0.10 {
-                        twoFingerMode = .scrolling
-                    } else {
-                        return
-                    }
-                }
-
-                if configuration.pointerMode == .virtualTrackpad,
-                   configuration.twoFingerTrackpadAction == .panViewport
-                {
-                    callbacks.onViewportPan(delta)
-                } else if !configuration.isInputDisabled {
-                    callbacks.onTwoFingerScroll(delta, location, velocity)
-                }
-
+                updateTwoFingerPan(translation: translation, location: location, velocity: velocity)
             case .ended, .cancelled, .failed:
-                let wasPanning = twoFingerMode == .scrolling &&
-                    configuration.pointerMode == .virtualTrackpad &&
-                    configuration.twoFingerTrackpadAction == .panViewport
-                if twoFingerMode == .scrolling {
-                    twoFingerMode = .undecided
-                }
-                lastTwoFingerTranslation = .zero
-                if wasPanning, gesture.state == .ended {
-                    callbacks.onViewportPanEnd(velocity)
-                }
-
+                endTwoFingerPan(velocity: velocity, isEnded: gesture.state == .ended)
             default:
                 break
+            }
+        }
+
+        private func beginTwoFingerPan() {
+            lastTwoFingerTranslation = .zero
+            callbacks.onViewportPanStart()
+            if twoFingerMode != .pinching {
+                twoFingerMode = .undecided
+            }
+        }
+
+        private func updateTwoFingerPan(translation: CGPoint, location: CGPoint, velocity: CGPoint) {
+            // Hold undecided travel so the lock transition emits the full cumulative delta.
+            guard advanceTwoFingerMode(translation: translation, location: location) else { return }
+
+            let delta = CGSize(
+                width: translation.x - lastTwoFingerTranslation.x,
+                height: translation.y - lastTwoFingerTranslation.y
+            )
+            lastTwoFingerTranslation = translation
+
+            if configuration.pointerMode == .virtualTrackpad,
+               configuration.twoFingerTrackpadAction == .panViewport
+            {
+                callbacks.onViewportPan(delta)
+            } else if !configuration.isInputDisabled {
+                callbacks.onTwoFingerScroll(delta, location, velocity)
+            }
+        }
+
+        /// Advances undecided two-finger touches toward scroll once spread stays stable.
+        private func advanceTwoFingerMode(translation: CGPoint, location: CGPoint) -> Bool {
+            if twoFingerMode == .pinching {
+                // Pinch can still become scroll on a long drag with stable spread.
+                let travel = hypot(translation.x, translation.y)
+                let pinchDelta = abs((pinchRecognizer?.scale ?? 1.0) - 1.0)
+                if travel > 24, pinchDelta < 0.14 {
+                    twoFingerMode = .scrolling
+                    pinchRecognizer?.scale = 1.0
+                    lastPinchAnchor = location
+                } else {
+                    return false
+                }
+            }
+            if twoFingerMode == .undecided {
+                let travel = hypot(translation.x, translation.y)
+                let pinchDelta = abs((pinchRecognizer?.scale ?? 1.0) - 1.0)
+                // Single 0.14 boundary matches pinch so large travel never stalls in a gap.
+                if travel >= 5, pinchDelta < 0.14 {
+                    twoFingerMode = .scrolling
+                } else {
+                    return false
+                }
+            }
+            return true
+        }
+
+        private func endTwoFingerPan(velocity: CGPoint, isEnded: Bool) {
+            let wasScrolling = twoFingerMode == .scrolling
+            let wasPanning = wasScrolling &&
+                configuration.pointerMode == .virtualTrackpad &&
+                configuration.twoFingerTrackpadAction == .panViewport
+            if wasScrolling {
+                twoFingerMode = .undecided
+            }
+            lastTwoFingerTranslation = .zero
+            if wasPanning, isEnded {
+                callbacks.onViewportPanEnd(velocity)
+            } else if wasScrolling, isEnded {
+                // Cancelled lifts never coast; only clean lifts arm the decay task.
+                callbacks.onTwoFingerScrollEnd?(velocity)
             }
         }
 
@@ -456,10 +491,11 @@ public struct CanvasGestureOverlay: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 lastPinchAnchor = anchor
-                callbacks.onViewportPanStart()
+                // Late pinch during scroll must not wipe the fixed scroll anchor.
                 if twoFingerMode == .scrolling {
                     return
                 }
+                callbacks.onViewportPanStart()
 
             case .changed:
                 if twoFingerMode == .scrolling {
@@ -468,7 +504,7 @@ public struct CanvasGestureOverlay: UIViewRepresentable {
                     return
                 }
                 if twoFingerMode == .undecided {
-                    if abs(gesture.scale - 1.0) < 0.06 {
+                    if abs(gesture.scale - 1.0) < 0.14 {
                         return
                     }
                     twoFingerMode = .pinching
@@ -540,6 +576,12 @@ public struct CanvasGestureOverlay: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 lastIndirectScrollTranslation = .zero
+                // Fresh anchor per indirect gesture so wheel pulses never reuse stale targets.
+                if let onScrollStart = callbacks.onScrollStart {
+                    onScrollStart()
+                } else {
+                    callbacks.onViewportPanStart()
+                }
             case .changed:
                 let delta = CGSize(
                     width: translation.x - lastIndirectScrollTranslation.x,
@@ -547,7 +589,10 @@ public struct CanvasGestureOverlay: UIViewRepresentable {
                 )
                 lastIndirectScrollTranslation = translation
                 callbacks.onTwoFingerScroll(delta, location, velocity)
-            case .ended, .cancelled, .failed:
+            case .ended:
+                lastIndirectScrollTranslation = .zero
+                callbacks.onTwoFingerScrollEnd?(velocity)
+            case .cancelled, .failed:
                 lastIndirectScrollTranslation = .zero
             default:
                 break

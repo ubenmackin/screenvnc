@@ -262,9 +262,16 @@ public struct ScrollAccumulator: Sendable {
     public var remainderX: CGFloat = 0
     public var remainderY: CGFloat = 0
     public let stepThreshold: CGFloat
+    /// Lift speeds above this gate a short coast; slower lifts settle immediately.
+    public static let coastVelocityThreshold: CGFloat = 300
 
-    public init(stepThreshold: CGFloat = 8.0) {
+    public init(stepThreshold: CGFloat = 4.0) {
         self.stepThreshold = max(1.0, stepThreshold)
+    }
+
+    /// Pure lift gate so coast decisions stay testable without hosting a view.
+    public static func shouldCoast(velocity: CGPoint) -> Bool {
+        hypot(velocity.x, velocity.y) > coastVelocityThreshold
     }
 
     public mutating func reset() {
@@ -280,9 +287,9 @@ public struct ScrollAccumulator: Sendable {
     /// Scales the delta by finger speed before accumulating into discrete steps.
     public mutating func consume(deltaX: CGFloat, deltaY: CGFloat, velocity: CGPoint, naturalScrolling: Bool) -> (stepsX: Int, stepsY: Int) {
         let speed = hypot(velocity.x, velocity.y)
-        // Slow drags stay precise; fast flings gain up to ~2.2x for fewer swipes.
+        // Fast flings gain up to 3x so long lists travel in fewer swipes.
         let normalizedSpeed = min(max((speed - 80.0) / 850.0, 0.0), 1.0)
-        let gain = 0.85 + normalizedSpeed * 1.35
+        let gain = 1.0 + normalizedSpeed * 2.0
         let sign: CGFloat = naturalScrolling ? -1.0 : 1.0
         remainderX += deltaX * gain * sign
         remainderY += deltaY * gain * sign

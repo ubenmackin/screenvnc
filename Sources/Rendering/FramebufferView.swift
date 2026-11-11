@@ -92,6 +92,8 @@ public struct FramebufferView: View {
     @State private var directTouchDragPoint: CGPoint?
     @State private var isHoverPointerActive = false
     @State private var scrollAccumulator = ScrollAccumulator()
+    @State private var scrollAnchor: CGPoint?
+    @State private var scrollCoastTask: Task<Void, Never>?
     @State private var inertiaTask: Task<Void, Never>?
     @State private var didApplyInitialPan = false
 
@@ -245,6 +247,8 @@ public struct FramebufferView: View {
             .onDisappear {
                 inertiaTask?.cancel()
                 inertiaTask = nil
+                scrollCoastTask?.cancel()
+                scrollCoastTask = nil
             }
         }
     }
@@ -279,6 +283,9 @@ public struct FramebufferView: View {
             },
             onViewportPanStart: {
                 scrollAccumulator.reset()
+                scrollAnchor = nil
+                scrollCoastTask?.cancel()
+                scrollCoastTask = nil
                 inertiaTask?.cancel()
                 inertiaTask = nil
             },
@@ -298,6 +305,12 @@ public struct FramebufferView: View {
             },
             onTwoFingerScroll: { delta, viewPoint, velocity in
                 handleScroll(delta: delta, at: viewPoint, velocity: velocity, in: viewSize)
+            },
+            onTwoFingerScrollEnd: { velocity in
+                handleScrollEnd(velocity: velocity, in: viewSize)
+            },
+            onScrollStart: {
+                handleScrollStart()
             },
             onHoverMove: { viewPoint in
                 handleHoverMove(to: viewPoint, in: viewSize)
@@ -418,8 +431,37 @@ public struct FramebufferView: View {
         }
     }
 
+    private func handleScrollStart() {
+        // Indirect pulses get a fresh anchor so prior touch scrolls never leak targets.
+        scrollAccumulator.reset()
+        scrollAnchor = nil
+        scrollCoastTask?.cancel()
+        scrollCoastTask = nil
+    }
+
+    private func emitScrollSteps(stepsX: Int, stepsY: Int, at anchor: CGPoint, in viewSize: CGSize) {
+        // Single emission path keeps live and coasted pulses on the same target.
+        let target = resolveTargetRemotePoint(viewPoint: anchor, in: viewSize)
+        let activeButtons: UInt8 = isLeftButtonHeld ? RFBConstants.PointerButton.left.rawValue : 0
+        if let onInputCommand {
+            onInputCommand(.scroll(
+                posX: target.x,
+                posY: target.y,
+                stepsX: stepsX,
+                stepsY: stepsY,
+                activeButtons: activeButtons
+            ))
+        } else {
+            emitFallbackScroll(posX: target.x, posY: target.y, stepsX: stepsX, stepsY: stepsY)
+        }
+    }
+
     private func handleScroll(delta: CGSize, at viewPoint: CGPoint, velocity: CGPoint, in viewSize: CGSize) {
         guard !isInputDisabled else { return }
+        if scrollAnchor == nil {
+            scrollAnchor = viewPoint
+        }
+        guard let anchor = scrollAnchor else { return }
         let steps = scrollAccumulator.consume(
             deltaX: delta.width,
             deltaY: delta.height,
@@ -427,19 +469,72 @@ public struct FramebufferView: View {
             naturalScrolling: settings.naturalScrolling
         )
         guard steps.stepsX != 0 || steps.stepsY != 0 else { return }
+        emitScrollSteps(stepsX: steps.stepsX, stepsY: steps.stepsY, at: anchor, in: viewSize)
+    }
 
-        let target = resolveTargetRemotePoint(viewPoint: viewPoint, in: viewSize)
-        let activeButtons: UInt8 = isLeftButtonHeld ? RFBConstants.PointerButton.left.rawValue : 0
-        if let onInputCommand {
-            onInputCommand(.scroll(
-                posX: target.x,
-                posY: target.y,
-                stepsX: steps.stepsX,
-                stepsY: steps.stepsY,
-                activeButtons: activeButtons
-            ))
-        } else {
-            emitFallbackScroll(posX: target.x, posY: target.y, stepsX: steps.stepsX, stepsY: steps.stepsY)
+    private func handleScrollEnd(velocity: CGPoint, in viewSize: CGSize) {
+        guard !isInputDisabled, ScrollAccumulator.shouldCoast(velocity: velocity), let anchor = scrollAnchor else { return }
+        scrollCoastTask?.cancel()
+        // Coast freezes lift target and buttons; natural scrolling rereads live
+        // per tick. Task holds only snapshots plus a local accumulator copy
+        // so a retained View never mutates @State or retargets on rotation.
+        let liftTarget = resolveTargetRemotePoint(viewPoint: anchor, in: viewSize)
+        let liftButtons: UInt8 = isLeftButtonHeld ? RFBConstants.PointerButton.left.rawValue : 0
+        let liftVelocity = velocity
+        let seedAccumulator = scrollAccumulator
+        let liftInputCommand = onInputCommand
+        let liftPointerEvent = onPointerEvent
+        scrollCoastTask = Task { @MainActor in
+            var accumulator = seedAccumulator
+            var emptyTicks = 0
+            for tickIndex in 0 ..< 8 {
+                if Task.isCancelled {
+                    break
+                }
+                do {
+                    try await Task.sleep(for: .milliseconds(16))
+                } catch {
+                    break
+                }
+                if Task.isCancelled {
+                    break
+                }
+                let decay = pow(0.85, Double(tickIndex))
+                let decayed = CGSize(
+                    width: liftVelocity.x * 0.016 * CGFloat(decay),
+                    height: liftVelocity.y * 0.016 * CGFloat(decay)
+                )
+                let steps = accumulator.consume(
+                    deltaX: decayed.width,
+                    deltaY: decayed.height,
+                    naturalScrolling: SettingsStore.shared.naturalScrolling
+                )
+                if steps.stepsX == 0, steps.stepsY == 0 {
+                    emptyTicks += 1
+                    if emptyTicks >= 2 {
+                        break
+                    }
+                    continue
+                }
+                emptyTicks = 0
+                if let liftInputCommand {
+                    liftInputCommand(.scroll(
+                        posX: liftTarget.x,
+                        posY: liftTarget.y,
+                        stepsX: steps.stepsX,
+                        stepsY: steps.stepsY,
+                        activeButtons: liftButtons
+                    ))
+                } else {
+                    Self.emitFallbackScrollSteps(
+                        posX: liftTarget.x,
+                        posY: liftTarget.y,
+                        stepsX: steps.stepsX,
+                        stepsY: steps.stepsY,
+                        onPointerEvent: liftPointerEvent
+                    )
+                }
+            }
         }
     }
 
@@ -625,6 +720,24 @@ public struct FramebufferView: View {
     }
 
     private func emitFallbackScroll(posX: Int, posY: Int, stepsX: Int, stepsY: Int) {
+        Self.emitFallbackScrollSteps(
+            posX: posX,
+            posY: posY,
+            stepsX: stepsX,
+            stepsY: stepsY,
+            onPointerEvent: onPointerEvent
+        )
+    }
+
+    @MainActor
+    private static func emitFallbackScrollSteps(
+        posX: Int,
+        posY: Int,
+        stepsX: Int,
+        stepsY: Int,
+        onPointerEvent: @MainActor (Int, Int, UInt8) -> Void
+    ) {
+        // Shared fallback path so live and coasted pulses emit identical clicks.
         let vButton = stepsY > 0 ? RFBConstants.PointerButton.scrollUp.rawValue : RFBConstants.PointerButton.scrollDown.rawValue
         for _ in 0 ..< min(abs(stepsY), 12) {
             onPointerEvent(posX, posY, vButton)
