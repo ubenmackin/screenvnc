@@ -1,7 +1,20 @@
 // Rendering — Primary active remote desktop session viewer and mode adapter.
+import Combine
 import os
 import SwiftUI
 import UIKit
+
+/// Overlap of the software keyboard over the window safe area; zero when hidden.
+@MainActor
+func keyboardOverlap(keyboardHeight: CGFloat, bottomSafeInset: CGFloat) -> CGFloat {
+    max(0, keyboardHeight - bottomSafeInset)
+}
+
+/// Dock bottom padding keeps chrome above the safe area plus keyboard overlap.
+@MainActor
+func sessionDockBottomPadding(safeBottom: CGFloat, base: CGFloat, overlap: CGFloat) -> CGFloat {
+    max(safeBottom, base) + overlap
+}
 
 /// Session delegate bridges actor callbacks onto MainActor framebuffer.
 @MainActor
@@ -61,19 +74,22 @@ public struct SoftwareKeyboardResponder: UIViewRepresentable {
     public var onDeleteBackward: @MainActor () -> Void
     public var onHardwareKey: (@MainActor (UInt32, Bool) -> Void)?
     public var onWindowSafeAreaChange: (@MainActor (EdgeInsets) -> Void)?
+    public var onDismissKeyboard: (@MainActor () -> Void)?
 
     public init(
         isActive: Binding<Bool>,
         onCharacter: @escaping @MainActor (Character) -> Void,
         onDeleteBackward: @escaping @MainActor () -> Void,
         onHardwareKey: (@MainActor (UInt32, Bool) -> Void)? = nil,
-        onWindowSafeAreaChange: (@MainActor (EdgeInsets) -> Void)? = nil
+        onWindowSafeAreaChange: (@MainActor (EdgeInsets) -> Void)? = nil,
+        onDismissKeyboard: (@MainActor () -> Void)? = nil
     ) {
         _isActive = isActive
         self.onCharacter = onCharacter
         self.onDeleteBackward = onDeleteBackward
         self.onHardwareKey = onHardwareKey
         self.onWindowSafeAreaChange = onWindowSafeAreaChange
+        self.onDismissKeyboard = onDismissKeyboard
     }
 
     public func makeUIView(context _: Context) -> KeyInputView {
@@ -82,6 +98,7 @@ public struct SoftwareKeyboardResponder: UIViewRepresentable {
         view.onDeleteBackward = onDeleteBackward
         view.onHardwareKey = onHardwareKey
         view.onWindowSafeAreaChange = onWindowSafeAreaChange
+        view.onDismissKeyboard = onDismissKeyboard
         return view
     }
 
@@ -90,6 +107,7 @@ public struct SoftwareKeyboardResponder: UIViewRepresentable {
         uiView.onDeleteBackward = onDeleteBackward
         uiView.onHardwareKey = onHardwareKey
         uiView.onWindowSafeAreaChange = onWindowSafeAreaChange
+        uiView.onDismissKeyboard = onDismissKeyboard
         uiView.publishWindowSafeAreaIfNeeded()
         if isActive, !uiView.isFirstResponder {
             Task { uiView.becomeFirstResponder() }
@@ -108,10 +126,32 @@ public struct SoftwareKeyboardResponder: UIViewRepresentable {
         var onDeleteBackward: (@MainActor () -> Void)?
         var onHardwareKey: (@MainActor (UInt32, Bool) -> Void)?
         var onWindowSafeAreaChange: (@MainActor (EdgeInsets) -> Void)?
+        var onDismissKeyboard: (@MainActor () -> Void)?
         private var lastPublishedSafeInsets = EdgeInsets()
 
         override public var canBecomeFirstResponder: Bool {
             true
+        }
+
+        override public var inputAccessoryView: UIView? {
+            dismissToolbar
+        }
+
+        private lazy var dismissToolbar: UIToolbar = {
+            let toolbar = UIToolbar()
+            toolbar.sizeToFit()
+            let flexible = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
+            let done = UIBarButtonItem(
+                barButtonSystemItem: .done,
+                target: self,
+                action: #selector(didTapDismissAccessory)
+            )
+            toolbar.items = [flexible, done]
+            return toolbar
+        }()
+
+        @objc private func didTapDismissAccessory() {
+            onDismissKeyboard?()
         }
 
         override public func didMoveToWindow() {
@@ -270,6 +310,7 @@ public struct InSessionView: View {
     @State private var isShowingGestureGuide: Bool = false
     @State private var zoomResetTrigger: Int = 0
     @State private var windowSafeInsets = EdgeInsets()
+    @State private var keyboardOverlap: CGFloat = 0
     @State private var sharedCursor: CGPoint = .init(x: 960, y: 540)
     @State private var tabletopScrollAccumulator = ScrollAccumulator()
     @State private var connectionState: VNCConnectionState = .connecting
@@ -322,7 +363,8 @@ public struct InSessionView: View {
                     onCharacter: handleTypedCharacter,
                     onDeleteBackward: handleBackspace,
                     onHardwareKey: handleKeyPress,
-                    onWindowSafeAreaChange: { windowSafeInsets = $0 }
+                    onWindowSafeAreaChange: { windowSafeInsets = $0 },
+                    onDismissKeyboard: { isKeyboardActive = false }
                 )
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
@@ -330,6 +372,16 @@ public struct InSessionView: View {
             }
         }
         .ignoresSafeArea()
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            withAnimation(keyboardAnimation(from: notification)) {
+                updateKeyboardOverlap(from: notification)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { notification in
+            withAnimation(keyboardAnimation(from: notification)) {
+                keyboardOverlap = 0
+            }
+        }
         .task {
             // Plaintext VNC-DES beyond loopback dials only after explicit user consent.
             if profile.requiresPlaintextConsent {
@@ -417,10 +469,32 @@ public struct InSessionView: View {
         )
     }
 
+    private func updateKeyboardOverlap(from notification: Notification) {
+        let height = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect)?.height ?? 0
+        keyboardOverlap = ScreenVNC.keyboardOverlap(keyboardHeight: height, bottomSafeInset: windowSafeInsets.bottom)
+    }
+
+    private func keyboardAnimation(from notification: Notification) -> Animation {
+        let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+        let curveRaw = (notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int) ?? UIView.AnimationCurve.easeInOut.rawValue
+        let curve = UIView.AnimationCurve(rawValue: curveRaw) ?? .easeInOut
+        // Match UIKit keyboard curve so chrome rides the same easing.
+        switch curve {
+        case .easeIn:
+            return .easeIn(duration: duration)
+        case .easeOut:
+            return .easeOut(duration: duration)
+        case .linear:
+            return .linear(duration: duration)
+        default:
+            return .easeInOut(duration: duration)
+        }
+    }
+
     /// Mode 1: Standard Phone — edge-to-edge canvas with unified collapsible floating dock.
     private func mode1Layout(geometry: GeometryProxy) -> some View {
         let safe = effectiveSafeInsets(for: geometry)
-        let bottomClearance = safe.bottom + (isToolbarCollapsed ? 60 : 84)
+        let bottomClearance = safe.bottom + (isToolbarCollapsed ? 60 : 84) + keyboardOverlap
         let insets = EdgeInsets(
             top: safe.top,
             leading: safe.leading,
@@ -443,7 +517,7 @@ public struct InSessionView: View {
             .ignoresSafeArea()
 
             unifiedSessionDock
-                .padding(.bottom, max(safe.bottom, 12))
+                .padding(.bottom, sessionDockBottomPadding(safeBottom: safe.bottom, base: 12, overlap: keyboardOverlap))
                 .padding(.horizontal, 10)
         }
     }
@@ -451,7 +525,7 @@ public struct InSessionView: View {
     /// Mode 2: iPad or Duo Inner Screen — full canvas with optional tabletop console split.
     private func mode2Layout(geometry: GeometryProxy) -> some View {
         let safe = effectiveSafeInsets(for: geometry)
-        let bottomClearance = safe.bottom + (isToolbarCollapsed ? 64 : 88)
+        let bottomClearance = safe.bottom + (isToolbarCollapsed ? 64 : 88) + keyboardOverlap
         let insets = EdgeInsets(
             top: safe.top,
             leading: safe.leading,
@@ -503,7 +577,7 @@ public struct InSessionView: View {
                 .ignoresSafeArea()
 
                 unifiedSessionDock
-                    .padding(.bottom, max(safe.bottom, 16))
+                    .padding(.bottom, sessionDockBottomPadding(safeBottom: safe.bottom, base: 16, overlap: keyboardOverlap))
                     .padding(.horizontal, 16)
             }
         }
@@ -515,7 +589,7 @@ public struct InSessionView: View {
         let insets = EdgeInsets(
             top: safe.top,
             leading: safe.leading,
-            bottom: safe.bottom,
+            bottom: safe.bottom + keyboardOverlap,
             trailing: safe.trailing + 64
         )
         return ZStack(alignment: .trailing) {
@@ -549,6 +623,7 @@ public struct InSessionView: View {
                 isInputDisabled: settings.viewOnly
             )
             .padding(.trailing, max(safe.trailing, 8))
+            .padding(.bottom, keyboardOverlap)
         }
     }
 
