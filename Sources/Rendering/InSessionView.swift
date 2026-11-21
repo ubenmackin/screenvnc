@@ -372,6 +372,7 @@ public struct InSessionView: View {
             }
         }
         .ignoresSafeArea()
+        .statusBarHidden(true)
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
             withAnimation(keyboardAnimation(from: notification)) {
                 updateKeyboardOverlap(from: notification)
@@ -591,7 +592,7 @@ public struct InSessionView: View {
             top: safe.top,
             leading: safe.leading,
             bottom: safe.bottom + keyboardOverlap,
-            trailing: safe.trailing + 64
+            trailing: OuterScreenRailMetrics.panClearance
         )
         return ZStack(alignment: .trailing) {
             FramebufferView(
@@ -623,7 +624,8 @@ public struct InSessionView: View {
                 onShowGestureGuide: { isShowingGestureGuide = true },
                 isInputDisabled: settings.viewOnly
             )
-            .padding(.trailing, max(safe.trailing, 8))
+            .padding(.trailing, OuterScreenRailMetrics.trailingMargin)
+            .padding(.vertical, OuterScreenRailMetrics.verticalMargin)
             .padding(.bottom, keyboardOverlap)
         }
     }

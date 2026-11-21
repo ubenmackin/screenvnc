@@ -1,4 +1,4 @@
-// Tests — Keyboard avoidance overlap and dock padding math.
+// Tests — Keyboard avoidance overlap, dock padding, and outer rail metrics.
 @testable import ScreenVNC
 import XCTest
 
@@ -77,5 +77,13 @@ final class SessionKeyboardAvoidanceTests: XCTestCase {
             26,
             accuracy: 0.001
         )
+    }
+
+    func testOuterRailMetricsPinTrailingEdge() {
+        // Rail spacing is fixed chrome; safe-area insets must not widen the pan clearance.
+        XCTAssertEqual(OuterScreenRailMetrics.trailingMargin, 8)
+        XCTAssertEqual(OuterScreenRailMetrics.itemSpacing, 8)
+        XCTAssertEqual(OuterScreenRailMetrics.panClearance, 56)
+        XCTAssertEqual(OuterScreenRailMetrics.verticalMargin, 8)
     }
 }

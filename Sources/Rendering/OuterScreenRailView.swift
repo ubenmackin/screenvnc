@@ -1,6 +1,16 @@
 // Rendering — Trailing vertical control rail for iPhone Duo outer display per Apple HIG.
 import SwiftUI
 
+/// Layout metrics for the outer-screen rail panel and its framebuffer pan clearance.
+public enum OuterScreenRailMetrics {
+    public static let trailingMargin: CGFloat = 8
+    public static let contentWidth: CGFloat = 44
+    public static let itemSpacing: CGFloat = 8
+    public static let verticalMargin: CGFloat = 8
+    /// Fixed clearance from the physical trailing edge; safe-area insets never shrink it.
+    public static let panClearance: CGFloat = 56
+}
+
 public struct OuterScreenRailView: View {
     @Binding public var activeModifiers: Set<MacKey>
     @Binding public var isKeyboardActive: Bool
@@ -58,73 +68,87 @@ public struct OuterScreenRailView: View {
                     .shadow(radius: 4)
             }
         } else {
-            VStack(spacing: 10) {
-                // Collapse action button
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                        isCollapsed = true
-                    }
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, height: 28)
+            ViewThatFits(in: .vertical) {
+                railContent
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    railContent
                 }
-
-                // Disconnect Action
-                SessionDisconnectButton(onDisconnect: onDisconnect)
-
-                Divider().frame(width: 20)
-
-                // Software Keyboard Toggle
-                SessionKeyboardToggleButton(
-                    isKeyboardActive: isKeyboardActive,
-                    isInputDisabled: isInputDisabled
-                ) {
-                    isKeyboardActive.toggle()
-                }
-
-                // Pointer Mode Toggle
-                SessionPointerModeButton(
-                    pointerMode: pointerMode,
-                    isInputDisabled: isInputDisabled
-                ) {
-                    onTogglePointerMode()
-                }
-
-                Divider().frame(width: 20)
-
-                // Modifiers within direct thumb reach
-                ForEach([MacKey.command, .option, .control, .shift]) { key in
-                    SessionModifierButton(
-                        key: key,
-                        isActive: activeModifiers.contains(key),
-                        isInputDisabled: isInputDisabled
-                    ) {
-                        toggleStickyMacModifier(key, activeModifiers: &activeModifiers, onKeyPress: onKeyPress)
-                    }
-                }
-
-                Divider().frame(width: 20)
-
-                // Zoom / Aspect Mode Toggle
-                SessionDisplayModeButton {
-                    onToggleDisplayPreference()
-                }
-
-                // Quick Mac Actions Menu
-                SessionMacActionsMenu(
-                    onSendShortcut: onSendShortcut,
-                    onResetZoom: onResetZoom,
-                    onShowGestureGuide: onShowGestureGuide,
-                    isInputDisabled: isInputDisabled
-                )
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, OuterScreenRailMetrics.verticalMargin)
             .padding(.horizontal, 4)
+            // Fixed width keeps the scroll fallback from stretching across the canvas.
+            .frame(width: OuterScreenRailMetrics.contentWidth)
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .shadow(radius: 4)
+        }
+    }
+
+    /// Expanded controls stay one column; short heights scroll instead of clipping.
+    private var railContent: some View {
+        VStack(spacing: OuterScreenRailMetrics.itemSpacing) {
+            // Collapse action button
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                    isCollapsed = true
+                }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, height: 28)
+            }
+
+            // Disconnect Action
+            SessionDisconnectButton(onDisconnect: onDisconnect)
+
+            Divider().frame(width: 20)
+
+            // Software Keyboard Toggle
+            SessionKeyboardToggleButton(
+                isKeyboardActive: isKeyboardActive,
+                isInputDisabled: isInputDisabled
+            ) {
+                isKeyboardActive.toggle()
+            }
+
+            // Pointer Mode Toggle
+            SessionPointerModeButton(
+                pointerMode: pointerMode,
+                isInputDisabled: isInputDisabled
+            ) {
+                onTogglePointerMode()
+            }
+
+            Divider().frame(width: 20)
+
+            // Modifiers within direct thumb reach
+            ForEach([MacKey.command, .option, .control, .shift]) { key in
+                SessionModifierButton(
+                    key: key,
+                    isActive: activeModifiers.contains(key),
+                    isInputDisabled: isInputDisabled
+                ) {
+                    toggleStickyMacModifier(key, activeModifiers: &activeModifiers, onKeyPress: onKeyPress)
+                }
+            }
+
+            Divider().frame(width: 20)
+
+            // Zoom / Aspect Mode Toggle
+            SessionDisplayModeButton {
+                onToggleDisplayPreference()
+            }
+
+            // Quick Mac Actions Menu
+            SessionMacActionsMenu(
+                onSendShortcut: onSendShortcut,
+                onResetZoom: onResetZoom,
+                onShowGestureGuide: onShowGestureGuide,
+                isInputDisabled: isInputDisabled
+            )
         }
     }
 }

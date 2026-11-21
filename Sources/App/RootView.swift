@@ -31,6 +31,7 @@ public struct RootView: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
 
     public init() {}
 
@@ -60,6 +61,7 @@ public struct RootView: View {
         .fullScreenCover(item: $activeSessionProfile) { profile in
             InSessionView(profile: profile) {
                 activeSessionProfile = nil
+                reachabilityService.refreshAll(profiles: profileStore.profiles)
             }
         }
         .sheet(isPresented: $isPresentingNewProfile) {
@@ -98,6 +100,9 @@ public struct RootView: View {
             } else {
                 discoveryService.stopDiscovery()
             }
+        }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            reachabilityService.setSceneActive(phase == .active)
         }
     }
 
